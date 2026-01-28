@@ -12,6 +12,9 @@ python -m pip install -r requirements.txt
 
 Tested Python version: 3.10
 
+This is simulator only. For those who want to test algorithms, please refer to 
+https://github.com/safe-autonomy-lab/GlucoAlg
+
 ## Why both `gym_env` and `safety_gymnasium`?
 
 Both folders provide Gymnasium-style APIs with costs, but for different consumers:

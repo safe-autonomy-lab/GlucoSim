@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glucosim"
+version = "0.1.0"
+description = "JAX-based diabetes simulation environments with cost-aware wrappers for safe RL."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+authors = [{name = "Minjae Kwon"}]
+dependencies = [
+  "numpy>=1.26.3",
+  "jax>=0.6.2",
+  "jaxlib>=0.6.2",
+  "pandas>=2.3.3",
+  "matplotlib>=3.10.3",
+  "gymnasium>=1.2.1",
+  "torch",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["glucosim*"]

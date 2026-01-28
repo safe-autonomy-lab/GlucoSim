@@ -1,0 +1,1 @@
+This entire folder is taken directly from https://github.com/jxx123/simglucose.

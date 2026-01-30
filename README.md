@@ -1,6 +1,6 @@
 # GlucoSim
 
-JAX-based diabetes simulation environments with cost-aware wrappers for safe RL.
+JAX-based diabetes simulation environments to test safe generalization across safe RL algorithms
 
 ## Dependencies
 
@@ -19,7 +19,7 @@ https://github.com/safe-autonomy-lab/GlucoAlg
 
 Both folders provide Gymnasium-style APIs with costs, but for different consumers:
 
-- `envs/gym_env`: local, lightweight registry + wrappers with a Gym-like API. Use this for day-to-day runs or when you just want a `make(...)` call that returns `(obs, reward, cost, terminated, truncated, info)`.
+- `envs/gym_env`: we need our local gym env because this environment should return reward and cost, so `make(...)` call that returns `(obs, reward, cost, terminated, truncated, info)`.
 - `envs/safety_gymnasium`: Safety-Gymnasium compatibility layer used by OmniSafe-style workflows. It is updated to work with Python >= 3.10, but OmniSafe itself is not compatible with Python >= 3.10 as of today.
 
 When OmniSafe catches up to Python >= 3.10, use `envs/diabetes_cmdp.py` as the entry point for OmniSafe algorithms.

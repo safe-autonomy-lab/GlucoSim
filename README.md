@@ -41,7 +41,7 @@ If you don't want to package it, you can also run from source by adding the repo
 ## Notes
 
 - The `safety_gymnasium` package mirrors Gymnasium wrappers but preserves cost signals.
-- The local `gym_env` registry is separate from Gymnasium's global registry; use `from glucobench import gym_env as gym` to get `gym.make(...)` behavior.
+- The local `gym_env` registry is separate from Gymnasium's global registry; use `from glucosim import gym_env as gym` to get `gym.make(...)` behavior.
 
 
 ## Quickstart (Gym-like usage)
@@ -49,8 +49,8 @@ If you don't want to package it, you can also run from source by adding the repo
 The repo registers `t1d-v0`, `t2d-v0`, and `t2d_no_pump-v0` on import. Use the local gym-like registry:
 
 ```python
-import glucobench  # registers t1d-v0 / t2d-v0 / t2d_no_pump-v0
-from glucobench import gym_env as gym
+import glucosim  # registers t1d-v0 / t2d-v0 / t2d_no_pump-v0
+from glucosim import gym_env as gym
 
 # Minimum episode length is one day! so even if you set up 12 * 60 (half day) as an episode length, it would convert to one day.
 env = gym.make(
@@ -78,7 +78,7 @@ Key knobs:
 Use the CMDP wrapper in `envs/diabetes_cmdp.py`:
 
 ```python
-from glucobench.diabetes_cmdp import DiabetesEnvs
+from glucosim.diabetes_cmdp import DiabetesEnvs
 
 cmdp = DiabetesEnvs(
     env_id="t1d-v0",
@@ -110,8 +110,8 @@ Example:
 
 ```python
 import numpy as np
-import glucobench
-from glucobench import gym_env as gym
+import glucosim
+from glucosim import gym_env as gym
 
 rng = np.random.default_rng(0)
 overrides = {

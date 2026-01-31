@@ -127,6 +127,9 @@ env = gym.make(
     patient_overrides=overrides,
 )
 ```
+## Models and Datasets
+We uploaded our models and datasets in the following links
+[![Hugging Face Models and Datasets]([https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Models-blue)](https://huggingface.co/safe-diabetes-benchmark?type=model](https://huggingface.co/safe-diabetes-benchmark))
 
 If this repository was helpful to your research, please consider citing our work:
 

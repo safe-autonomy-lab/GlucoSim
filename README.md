@@ -136,9 +136,9 @@ If this repository was helpful to your research, please consider citing our work
 **BibTeX:**
 ```bibtex
 @inproceedings{
-anonymous2026safety,
+kwon2026safetygeneralizationdistributionshift,
 title={Safety Generalization Under Distribution Shift in Safe Reinforcement Learning: A Diabetes Testbed},
-author={Anonymous},
+author={Minjae Kwon and Josephine Lamp and Lu Feng},
 booktitle={Forty-third International Conference on Machine Learning},
 year={2026},
 url={https://openreview.net/forum?id=kSUGLBHd0T}

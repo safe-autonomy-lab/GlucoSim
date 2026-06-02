@@ -133,17 +133,13 @@ We uploaded our models and datasets in the following links
 
 If this repository was helpful to your research, please consider citing our work:
 
-**APA Style:**
-> Kwon, M., Lamp, J., & Feng, L. (2026). Safety Generalization Under Distribution Shift in Safe Reinforcement Learning: A Diabetes Testbed. arXiv preprint arXiv:2601.21094.
-
 **BibTeX:**
 ```bibtex
-@misc{kwon2026safetygeneralizationdistributionshift,
-      title={Safety Generalization Under Distribution Shift in Safe Reinforcement Learning: A Diabetes Testbed}, 
-      author={Minjae Kwon and Josephine Lamp and Lu Feng},
-      year={2026},
-      eprint={2601.21094},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={[https://arxiv.org/abs/2601.21094](https://arxiv.org/abs/2601.21094)}, 
+@inproceedings{
+anonymous2026safety,
+title={Safety Generalization Under Distribution Shift in Safe Reinforcement Learning: A Diabetes Testbed},
+author={Anonymous},
+booktitle={Forty-third International Conference on Machine Learning},
+year={2026},
+url={https://openreview.net/forum?id=kSUGLBHd0T}
 }

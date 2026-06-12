@@ -38,3 +38,10 @@ Thumbs.db
 # Local data/artifacts
 results/
 artifacts/
+
+# Claude Code
+.claude/
+
+# Local planning scratch
+plan/
+temp/

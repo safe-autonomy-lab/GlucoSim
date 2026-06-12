@@ -218,10 +218,9 @@ opening a pull request.
 
 ## License
 
-License terms have not been finalized yet; until a `LICENSE` file is added,
-all rights are reserved by the authors. Vendored Gymnasium / Safety-Gymnasium /
-OmniSafe code in `glucosim/gym_env` and `glucosim/safety_gymnasium` retains its
-original Apache-2.0 notices.
+This project is released under the [MIT License](LICENSE). Vendored
+Gymnasium / Safety-Gymnasium / OmniSafe code in `glucosim/gym_env` and
+`glucosim/safety_gymnasium` retains its original Apache-2.0 notices.
 
 ## Citation
 

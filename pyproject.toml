@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "JAX-based diabetes simulation environments with cost-aware wrappers for safe RL."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Proprietary"}
+license = {text = "MIT"}
 authors = [{name = "Minjae Kwon"}]
 dependencies = [
   "numpy>=1.26",

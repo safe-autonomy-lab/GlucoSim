@@ -1,12 +1,27 @@
+"""OmniSafe-compatible CMDP wrapper around :class:`JaxSimEnv`.
+
+This module requires the optional ``omnisafe``, ``torch``, and
+``stable-baselines3`` dependencies; install them separately (they are not
+part of the core ``glucosim`` requirements).
+"""
 from typing import Any, ClassVar, Union, Tuple, List, Dict, Optional
-import torch
+
+try:
+    import torch
+    from omnisafe.envs.core import CMDP, env_register
+    from stable_baselines3.common.utils import set_random_seed
+except ImportError as exc:  # pragma: no cover - exercised only without extras
+    raise ImportError(
+        "glucosim.diabetes_cmdp requires the optional dependencies "
+        "'omnisafe', 'torch', and 'stable-baselines3'. Install them with: "
+        "pip install omnisafe stable-baselines3"
+    ) from exc
+
 from gymnasium import spaces
 import numpy as np
-from omnisafe.envs.core import CMDP, env_register
 import glucosim
 from glucosim.safety_gymnasium.vector import SafetySyncVectorEnv
 from glucosim.simglucose.sim.env import JaxSimEnv
-from stable_baselines3.common.utils import set_random_seed
 import jax
 
 

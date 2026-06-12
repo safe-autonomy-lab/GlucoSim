@@ -11,15 +11,25 @@ requires-python = ">=3.10"
 license = {text = "Proprietary"}
 authors = [{name = "Minjae Kwon"}]
 dependencies = [
-  "numpy>=1.26.3",
-  "jax>=0.6.2",
-  "jaxlib>=0.6.2",
-  "pandas>=2.3.3",
-  "matplotlib>=3.10.3",
-  "gymnasium>=1.2.1",
-  "torch",
+  "numpy>=1.26",
+  "jax>=0.6",
+  "pandas>=2.0",
+  "matplotlib>=3.8",
+  "gymnasium>=1.2",
 ]
+
+[project.optional-dependencies]
+# OmniSafe CMDP wrapper (glucosim.diabetes_cmdp)
+omnisafe = ["torch", "omnisafe", "stable-baselines3"]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Repository = "https://github.com/safe-autonomy-lab/GlucoSim"
+Paper = "https://openreview.net/forum?id=kSUGLBHd0T"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["glucosim*"]
+
+[tool.setuptools.package-data]
+"glucosim.simglucose.params" = ["*.csv"]

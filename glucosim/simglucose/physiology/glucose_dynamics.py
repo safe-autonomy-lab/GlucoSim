@@ -144,9 +144,14 @@ def hovorka_t1d(
     # -------------------------------------------------------------------------
     # GLUCOSE subsystem (mg/kg & mg/kg/min)
     # -------------------------------------------------------------------------
-    # EGP (mg/kg/min) linear form on Gp mass (mg/kg) and insulin concentration (pmol/L)
+    # EGP (mg/kg/min) linear form on Gp mass (mg/kg) and insulin concentration (pmol/L).
+    # DESIGN NOTE: this T1D model uses the *instantaneous* plasma insulin concentration
+    # (x[5]/Vi) to drive EGP suppression and insulin-dependent utilization. The remote
+    # insulin-action states x1/x2/x3 (x[6], x[7], x[8]) are integrated below for state
+    # compatibility with the T2D model but are intentionally NOT used here, so insulin
+    # acts without the additional remote-compartment delay (the SC absorption chain
+    # Isc1->Isc2->Ip still provides the dominant lag). See README "Known limitations".
     I_conc_pmolL = x[5] / Vi
-    # If x[8] (x3) is the insulin effect, you may substitute I_conc_pmolL with x[8] if model uses x3.
     EGP_raw = kp1 - kp2 * x[3] - kp3 * I_conc_pmolL
     EGP_mgkgmin = jnp.maximum(EGP_raw, 0.0)
 
@@ -176,8 +181,11 @@ def hovorka_t1d(
     dIp_dt = _nn(x[5], dIp_dt)
     dxdt = dxdt.at[5].set(dIp_dt)
 
-    # Insulin action filters (example first-order)
-    # x1 drives remote effect from plasma insulin concentration
+    # Remote insulin-action filters x1/x2/x3. These are integrated to keep the state
+    # vector identical to the T2D model, but (unlike T2D) they do not feed back into
+    # EGP or utilization above -- T1D insulin action is instantaneous in plasma insulin
+    # by design (see DESIGN NOTE near EGP). Do not wire these into the glucose terms
+    # without re-tuning the fasting steady state and re-validating bolus transients.
     dxdt = dxdt.at[6].set(-params.p2u * x[6] + params.p2u * (I_conc_pmolL - Ib))
     dxdt = dxdt.at[7].set(-ki * (x[7] - I_conc_pmolL))
     dxdt = dxdt.at[8].set(-ki * (x[8] - x[7]))

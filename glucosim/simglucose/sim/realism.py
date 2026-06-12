@@ -65,7 +65,13 @@ def disturb_action(action: jnp.ndarray,
     )
     insulin = insulin + wobble
 
-    hr = jnp.clip(action[2] + 0.02 * random.normal(k_hr, shape=()), 0.0, 1.0)
+    # Heart-rate / exercise input. Only perturb it when an actual exercise command
+    # is present: otherwise this zero-mean noise, clipped at 0, rectifies to a
+    # positive mean and silently injects exercise glucose disposal during
+    # basal-only operation (it depressed the fasting steady state by ~30 mg/dL).
+    # The k_hr key is drawn unconditionally so the RNG chain is unchanged.
+    hr_noisy = jnp.clip(action[2] + 0.02 * random.normal(k_hr, shape=()), 0.0, 1.0)
+    hr = jnp.where(action[2] > 0.0, hr_noisy, action[2])
 
     noisy = jnp.stack([meal, insulin, hr]).astype(action.dtype)
     return noisy, key

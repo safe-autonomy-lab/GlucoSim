@@ -194,6 +194,11 @@ configuration within a process.
 - The physiological model is a research adaptation of the UVA/Padova-style
   ODE model with behavioral layers on top; it has not been re-validated against
   clinical data in this repository.
+- In the T1D model, insulin acts on EGP and glucose utilization through the
+  *instantaneous* plasma insulin concentration; the remote insulin-action delay
+  states (x1/x2/x3) are present for state compatibility with the T2D model but
+  are intentionally not wired into the glucose equations. The subcutaneous
+  absorption chain still provides the dominant insulin lag.
 
 ## Troubleshooting
 

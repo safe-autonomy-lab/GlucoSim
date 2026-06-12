@@ -205,6 +205,11 @@ configuration within a process.
   `JAX_PLATFORMS=cpu` unless you need GPU throughput.
 - **`ImportError` from `glucosim.diabetes_cmdp`**: install the optional
   `torch`, `omnisafe`, and `stable-baselines3` dependencies.
+- **Tests pass for you but fail elsewhere, or `import glucosim` loads an
+  unexpected version**: an older `glucosim` may be installed in the same
+  environment and shadowing this checkout. Run from a clean virtual
+  environment, or confirm the source with
+  `python -c "import glucosim; print(glucosim.__file__)"`.
 
 ## Models and datasets
 

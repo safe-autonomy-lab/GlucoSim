@@ -13,14 +13,19 @@ import gc
 import os
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Generic, SupportsFloat
+from typing import Any, Generic, SupportsFloat, TypeVar
 
 import numpy as np
 
 import gymnasium as gym
 from gymnasium import error, logger
-from gymnasium.core import ActType, ObsType, RenderFrame
+from gymnasium.core import ActType, ObsType
 from gymnasium.error import DependencyNotInstalled, InvalidProbability
+
+# gymnasium>=1.3 turned ``RenderFrame`` into a union type, which is not a valid
+# ``Generic[...]`` parameter. Keep a local TypeVar so this vendored module works
+# across gymnasium versions.
+RenderFrame = TypeVar("RenderFrame")
 
 
 __all__ = [

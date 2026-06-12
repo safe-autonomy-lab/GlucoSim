@@ -1,6 +1,10 @@
-import torch
 import csv
 import os
+
+try:  # torch is only needed when actions arrive as torch.Tensor (e.g. OmniSafe)
+    import torch
+except ImportError:  # pragma: no cover - torch is an optional dependency
+    torch = None
 import logging
 from collections import OrderedDict
 import jax
@@ -189,10 +193,14 @@ class JaxSimEnv(gym.Env):
         self.episode_return = 0.0
         self.episode_cost = 0.0
         self.episode_steps = 0
-        # Create a new master key for the episode
-        if self.key is None:
-            self.key = jax.random.PRNGKey(seed if seed is not None else 0)
-        
+        # Re-seed the master key when an explicit seed is provided so that
+        # reset(seed=s) always reproduces the same episode, regardless of how
+        # many episodes were run before.
+        if seed is not None:
+            self.key = jax.random.PRNGKey(seed)
+        elif self.key is None:
+            self.key = jax.random.PRNGKey(0)
+
         # Split the key for the reset function
         self.key, reset_key = jax.random.split(self.key)
 
@@ -210,11 +218,9 @@ class JaxSimEnv(gym.Env):
             self.env_params.noise_config,
         )
         warm_state = self._get_warm_state(cache_key)
-        initial_state, initial_obs = reset(
-                self.env_params, tuned_state, reset_key, warm_state=warm_state
-            )
-        # We need to call this at least once
         if warm_state is None:
+            # First reset for this configuration: run the (expensive) basal-only
+            # warmup once and cache the resulting fasting steady state.
             warm_state, initial_state, initial_obs = reset(self.env_params, tuned_state, reset_key, return_warm_state=True)
             self._store_warm_state(cache_key, warm_state)
         else:
@@ -257,7 +263,7 @@ class JaxSimEnv(gym.Env):
             raise RuntimeError("Cannot call step before reset. Call env.reset() first.")
             
         # torch.Tensor is used when we work with omnisafe RL framework
-        if isinstance(action, torch.Tensor):
+        if torch is not None and isinstance(action, torch.Tensor):
             action = action.cpu().numpy()
         
         # Track requested actions

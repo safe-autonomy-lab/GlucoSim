@@ -33,8 +33,13 @@ def mini_step(state: dict, patient_action: Action, env_params: EnvParams, skip_s
     """
     patient_params: PatientParams = env_params.patient_params
     noise_config: NoiseConfig = env_params.noise_config
-    # Scale the per-step eat_rate down to the per-minute simulator resolution.
-    eat_rate_per_min = jnp.asarray(patient_params.eat_rate / float(env_params.sample_time), dtype=jnp.float32)
+    # eat_rate is already in g/min (see PatientParams units). The inner ODE loop
+    # (mini_step) advances one simulated minute at a time, so the per-minute meal
+    # intake is simply eat_rate. It must NOT be divided by sample_time: doing so
+    # made gut filling depend on the controller interval (a control/observation
+    # choice), so the same meal absorbed at different rates for different
+    # sample_time values. See tests/test_meal_absorption.py.
+    eat_rate_per_min = jnp.asarray(patient_params.eat_rate, dtype=jnp.float32)
     key, subkey_step = jax.random.split(state['key'], 2)
     # Scenarios here
     current_total_minutes = state['t']

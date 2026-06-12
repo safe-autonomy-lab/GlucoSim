@@ -302,8 +302,13 @@ class NoiseConfig:
     missed_bolus_prob: float = 0.02        # Bernoulli miss
     pump_basal_rel_sigma: float = 0.03     # multiplicative noise on pump basal (as action delta)
 
-    # Circadian modulation (applied as additive delta on Gp post-step)
-    circadian_egp_amp_rel: float = 0.10    # ±% modulation of hepatic drive
+    # Circadian modulation (applied as additive delta on Gp post-step).
+    # NOTE: the fasting glucose equilibrium is highly sensitive to the EGP
+    # intercept kp1 (kp2 is small), so this relative modulation of kp1 maps to a
+    # much larger absolute glucose swing. At 0.10 the daily swing was ~50 mg/dL
+    # and episodes started near 80 mg/dL (circadian trough at t=0). 0.03 keeps a
+    # realistic dawn-phenomenon swing (~15 mg/dL). See tests/test_circadian_fasting.py.
+    circadian_egp_amp_rel: float = 0.03    # ±relative modulation of hepatic drive
     circadian_phase_min: float = 4 * 60.0
     circadian_period_min: float = 24 * 60.0
 

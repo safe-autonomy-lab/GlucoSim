@@ -4,7 +4,7 @@ import jax.numpy as jnp
 
 from ..core.types import Action, PatientType
 from ..core.params import PatientParams
-from ..physiology.glucose_dynamics import t1d_rk4_step, t2d_rk4_step
+from .physiology_step import t1d_rk4_step, t2d_rk4_step
 from ..sim.sensor import cgm_measurement
 from ..sim.realism import NoiseConfig
 

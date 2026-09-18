@@ -12,6 +12,7 @@ import jax
 from ..core.types import PatientType
 # Re-export the existing loader API for callers importing core.params.
 from .patient_loader import load_patient_parameters_from_csv
+from . import presets
 from ..sim.scenario_gen import get_meal_profile_for_cohort
 from ..physiology.kernels import create_insulin_kernel
 
@@ -624,28 +625,8 @@ def adapt_params_for_t1d(
     logger.info("Adapting parameters for Type 1 Diabetes")
     
     # T1D-specific adjustments
-    params = dataclasses.replace(params,
-        # No endogenous insulin production
-        beta_cell_function=0.0,
-
-        # Normal insulin sensitivity
-        insulin_resistance_factor=1.0,
-        
-        # Typically use pump for better control
-        use_pump=True,
-        
-        # Higher adherence to insulin therapy (survival depends on it)
-        bolus_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-        
-        # More careful meal planning
-        meal_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-        
-        # Tighter safety margins due to no endogenous backup
-        meal_safe_window=60.0,  # minutes
-        bolus_safe_window=60.0,  # minutes
-
-        # Empirical T1D basal proxy (U/hr); the target-balance formula is T2D-only.
-        basal=params.BW * 0.011,  # U/h
+    params = dataclasses.replace(
+        params, **presets.t1d_overrides(params, ACCEPTANCE_PROB_DEFAULT)
     )
     # Autobalance the basal rate, with optional weakening to expose harsher dynamics
     if autobalance_enabled:
@@ -706,12 +687,7 @@ def adapt_params_for_t2d(
     logger.info("Adapting parameters for Type 2 Diabetes (with pump)")
 
     # Default T2D scaling factors
-    default_config = {
-        'Ib_factor': 1.25,      # Residual beta-cell function (25% increase)
-        'Ipb_factor': 1.25,     # Plasma insulin at basal state
-        'HEb_factor': 0.85,     # Reduced hepatic insulin clearance
-        'BW_factor': 1.15,      # Higher body weight for T2D
-    }
+    default_config = presets.t2d_scaling_defaults()
     config = config or default_config
 
     # Start with original T1D parameters for proper conversion
@@ -726,7 +702,7 @@ def adapt_params_for_t2d(
         Ilb=temp_params.Ilb * config['Ipb_factor'],  # Scale liver insulin to maintain equilibrium ratio
         HEb=temp_params.HEb * config['HEb_factor'],
         # Select resistance before converting the unscaled insulin-effect gains.
-        insulin_resistance_factor=2.5,
+        insulin_resistance_factor=presets.T2D_INSULIN_RESISTANCE,
     )
 
     # Convert to T2D format using comprehensive conversion logic
@@ -742,32 +718,7 @@ def adapt_params_for_t2d(
 
     # Apply T2D-specific behavioral and physiological parameters
     t2d_params = dataclasses.replace(
-        t2d_params,
-        # Residual beta-cell function (25-30% remaining)
-        beta_cell_function=0.25,
-
-        # Moderate insulin resistance
-        insulin_resistance_factor=2.5,
-
-        # Use pump for better glucose control
-        use_pump=True,
-
-        # For now, full acceptance to simplify learning
-        bolus_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-
-        # For now, full acceptance to simplify learning
-        meal_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-
-        # Longer safety windows due to residual insulin production
-        meal_safe_window=60.0,  # minutes
-        bolus_safe_window=60.0,  # minutes
-
-        # Higher limits due to insulin resistance
-        max_bolus_U=10.0,
-        max_meal_g=100.0,
-
-        # Basal targeting Ib under the two-pool insulin balance
-        basal=basal_rate,  # U/h
+        t2d_params, **presets.t2d_overrides(basal_rate, ACCEPTANCE_PROB_DEFAULT)
     )
 
     # Re-balance basal fluxes once insulin sensitivity scaling and pump basal are final.
@@ -847,35 +798,7 @@ def adapt_params_for_t2d_no_pump(
 
     # No-pump specific adjustments
     params = dataclasses.replace(
-        params,
-        # No insulin pump
-        use_pump=False,
-        beta_cell_function=0.3,
-
-        # Higher insulin resistance (injection site variability)
-        insulin_resistance_factor=2.8,
-        # Recompute from the original gains, not the already-scaled pump gains.
-        S_I1=base_params.S_I1 / 2.8,
-        S_I2=base_params.S_I2 / 2.8,
-        S_I3=base_params.S_I3 / 2.8,
-
-        # For now, full acceptance to simplify learning
-        bolus_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-
-        # For now, full acceptance to simplify learning
-        meal_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
-
-        # Longer safety windows due to manual injections
-        meal_safe_window=60.0,  # minutes
-        bolus_safe_window=60.0,  # minutes
-
-        # Higher limits to account for less precise delivery
-        max_bolus_U=10.0,
-        max_meal_g=100.0,
-        K_deriv=30.0,
-
-        # No pump, no basal
-        basal=0.0,  # U/h baseline
+        params, **presets.t2d_no_pump_overrides(base_params, ACCEPTANCE_PROB_DEFAULT)
     )
 
     Ip_ss, Il_ss = _steady_state_insulin_from_Sb(params)

@@ -12,38 +12,38 @@ logger = logging.getLogger('glucosim.simglucose.core.params')
 def load_patient_parameters_from_csv(csv_path: str) -> Dict[str, Dict]:
     """
     Load patient parameters from CSV file and return as dictionary.
-    
+
     Args:
         csv_path: Path to the vpatient_params.csv file
-        
+
     Returns:
         Dictionary mapping patient names to their parameter dictionaries
-        
+
     Raises:
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV format is invalid
     """
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Patient parameters CSV file not found: {csv_path}")
-    
+
     try:
         # Read CSV file
         df = pd.read_csv(csv_path)
         logger.info(f"Loaded patient data for {len(df)} patients from {csv_path}")
-        
+
         # Validate required columns
         required_columns = ['Name', 'BW', 'EGPb', 'Gb', 'Ib', 'u2ss', 'Vg', 'Vi', 'Ipb', 'Ilb', 'Gpb', 'Gtb']
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             raise ValueError(f"Missing required columns in CSV: {missing_columns}")
-        
+
         # Convert to dictionary format
         patient_data = {}
         for _, row in df.iterrows():
             patient_name = row['Name']
             if pd.isna(patient_name) or patient_name == '':
                 continue  # Skip empty rows
-                
+
             # Extract parameters from CSV row
             params = {
                 # Core Physiological
@@ -59,7 +59,7 @@ def load_patient_parameters_from_csv(csv_path: str) -> Dict[str, Dict]:
                 'Gpb': float(row['Gpb']),
                 'Gtb': float(row['Gtb']),
                 'Fsnc': float(row.get('Fsnc', 1.0)),  # mg/kg/min
-                
+
                 # Meal Absorption
                 'kmax': float(row['kmax']),
                 'kmin': float(row['kmin']),
@@ -67,7 +67,7 @@ def load_patient_parameters_from_csv(csv_path: str) -> Dict[str, Dict]:
                 'b': float(row['b']),
                 'd': float(row['d']),
                 'f': float(row['f']),
-                
+
                 # Insulin Kinetics
                 'ka1': float(row['ka1']),
                 'ka2': float(row['ka2']),
@@ -80,14 +80,14 @@ def load_patient_parameters_from_csv(csv_path: str) -> Dict[str, Dict]:
                 'm5': float(row['m5']),
                 'CL': float(row['CL']),
                 'HEb': float(row['HEb']),
-                
+
                 # Insulin Action
                 'Vmx': float(row['Vmx']),
                 'Vm0': float(row['Vm0']),
                 'Km0': float(row['Km0']),
                 'p2u': float(row['p2u']),
                 'ki': float(row['ki']),
-                
+
                 # Glucose Kinetics
                 'kp1': float(row['kp1']),
                 'kp2': float(row['kp2']),
@@ -99,12 +99,12 @@ def load_patient_parameters_from_csv(csv_path: str) -> Dict[str, Dict]:
                 'Rdb': float(row['Rdb']),
                 'PCRb': float(row['PCRb']),
             }
-            
+
             patient_data[patient_name] = params
             logger.debug(f"Loaded parameters for patient: {patient_name}")
-            
+
         return patient_data
-        
+
     except Exception as e:
         logger.error(f"Error loading patient parameters from CSV: {e}")
         raise ValueError(f"Failed to parse patient parameters CSV: {e}")

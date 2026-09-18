@@ -13,6 +13,7 @@ from ..core.types import PatientType
 # Re-export the existing loader API for callers importing core.params.
 from .patient_loader import load_patient_parameters_from_csv
 from . import presets
+from ..physiology import calibration
 from ..sim.scenario_gen import get_meal_profile_for_cohort
 from ..physiology.kernels import create_insulin_kernel
 
@@ -533,67 +534,13 @@ def autobalance_basal_t1d(
     basal_scale: float = 1.0,
     hepatic_scale: float = 1.0,
 ) -> PatientParams:
-    """
-    Make the T1D default a true steady state for the provided (Gpb,Gtb,Ipb) and current p.
-    Solves:
-      1) peripheral utilization  U_id(Gtb, Ipb) = k1*Gpb - k2*Gtb  (=> Vmx)
-      2) hepatic balance         EGP(Gpb,Ipb)   = Fsnc + E_renal + k1*Gpb - k2*Gtb (=> kp1)
-    """
-    # ---- Targets from basal masses ----
-    U_star = p.k1 * p.Gpb - p.k2 * p.Gtb                      # mg/kg/min
-    frac   = p.Gtb / (p.Km0 + p.Gtb)                          # dimensionless MM fraction
-
-    # ---- Basal insulin concentration (pmol/L) ----
-    I_p_pmol_L = p.Ipb / p.Vi
-
-    # ---- (1) Peripheral: choose Vm0 (keep) and solve Vmx to hit U_star ----
-    # Ensure Vmx is positive by capping Vm0 at a fraction of total uptake
-    # If Vm0 from CSV is too high, insulin has no room to act.
-    # Standard basal insulin-independent uptake is usually 1.0-2.5 mg/kg/min.
-    Vm0_target = min(p.Vm0, U_star / frac * 0.75)
-    
-    # If Vm0_target is still too high or close to total, force it down.
-    # We want Vmx * I_p > 0. So Vm0 + Vmx*I = U_star/frac.
-    # Vmx = (U_star/frac - Vm0) / I_p.
-    # Let's just use the adjusted Vm0.
-    Vm0_new = Vm0_target * basal_scale
-    Vmx_new = max((U_star/frac - Vm0_new) / max(I_p_pmol_L, 1e-6), 1e-5)
-
-    # ---- (2) Hepatic: pick kp1 so dGp=0 at basal (no meal, no exercise) ----
-    # Renal loss at basal:
-    E_renal = p.ke1 * (p.Gpb - p.ke2) if p.Gpb > p.ke2 else 0.0
-    # CNS usage (legacy Fsnc, mg/kg/min):
-    F_cns = p.Fsnc
-
-    # We want: 0 = EGP + Ra - F_cns - E_renal - k1*Gp + k2*Gt  (Ra=0 at basal)
-    # With EGP = kp1 - kp2*Gp - kp3*I_conc (I_conc=Ipb/Vi):
-    I_conc = I_p_pmol_L
-    kp1_new = (p.kp2 * p.Gpb + p.kp3 * I_conc
-               + F_cns + E_renal + p.k1 * p.Gpb - p.k2 * p.Gtb)
-    kp1_new = kp1_new * hepatic_scale
-
-    return dataclasses.replace(p, Vm0=Vm0_new, Vmx=Vmx_new, kp1=kp1_new)
+    """Compatibility entry point for the T1D factory calibration."""
+    return calibration.autobalance_basal_t1d(p, basal_scale, hepatic_scale)
 
 
 def autobalance_basal_t2d(params: PatientParams) -> PatientParams:
-    U_star = params.k1 * params.Gpb - params.k2 * params.Gtb
-    frac = params.Gtb / max(params.Km0 + params.Gtb, 1e-6)
-
-    I_p_pmol_L = params.Ipb / params.Vi
-    I_p_mU_L   = I_p_pmol_L / 6.0
-
-    Vm0_new = 1.0
-    Vmx_new = max((U_star / max(frac, 1e-6) - Vm0_new) / max(I_p_pmol_L, 1e-6), 0.0)
-
-    x3_basal = (params.S_I3 / max(params.k_a3, 1e-6)) * I_p_mU_L
-    F_cns_mgkgmin = (params.F_cns0 * 180.0) / params.BW
-    E_renal = params.ke1 * max(params.Gpb - params.ke2, 0.0)
-
-    one_minus = max(1.0 - x3_basal, 1e-6)
-    EGP0_mgkgmin = (U_star + F_cns_mgkgmin + E_renal) / one_minus
-    EGP0_mmolmin = EGP0_mgkgmin * params.BW / 180.0
-
-    return dataclasses.replace(params, Vm0=Vm0_new, Vmx=Vmx_new, EGP_0=EGP0_mmolmin)
+    """Compatibility entry point for the T2D factory calibration."""
+    return calibration.autobalance_basal_t2d(params)
 
 
 def adapt_params_for_t1d(
@@ -707,33 +654,14 @@ def adapt_params_for_t2d(
 
     # Convert to T2D format using comprehensive conversion logic
     t2d_params = patient_to_t2d_params(temp_params, use_dynamic_HE=False)
-    # Target Ib under the implemented plasma/liver balance, including return flow.
-    liver_return = t2d_params.m1 / (t2d_params.m1 + t2d_params.m30)
-    clearance = t2d_params.m2 + t2d_params.m4 - liver_return * t2d_params.m2
-    required_pmolkgmin = (clearance * t2d_params.Ib * t2d_params.Vi
-                         - liver_return * 6.0 * t2d_params.Sb_per_kg)
-    # A pump cannot remove insulin: excessive endogenous supply gives zero basal
-    # and an achieved insulin concentration above the target.
-    basal_rate = max(0.0, required_pmolkgmin * t2d_params.BW * 60.0 / 6000.0)
+    basal_rate = calibration.pump_basal_rate_t2d(t2d_params)
 
     # Apply T2D-specific behavioral and physiological parameters
     t2d_params = dataclasses.replace(
         t2d_params, **presets.t2d_overrides(basal_rate, ACCEPTANCE_PROB_DEFAULT)
     )
 
-    # Re-balance basal fluxes once insulin sensitivity scaling and pump basal are final.
-    t2d_params = autobalance_basal_t2d(t2d_params)
-
-    # Final steady-state sync: recompute Ipb/Ilb after all scaling so residuals vanish
-    Ip_ss, Il_ss = _steady_state_insulin_from_Sb(t2d_params)
-    t2d_params = dataclasses.replace(t2d_params, Ipb=Ip_ss, Ilb=Il_ss)
-
-    # 4. Final steady-state sync
-    # We have changed Sb_per_kg, HEb, and potentially other factors.
-    # The scaled Ipb/Ilb we started with are just estimates.
-    # We must solve for the TRUE steady state implied by these new parameters to avoid residuals.
-    Ip_ss, Il_ss = _steady_state_insulin_from_Sb(t2d_params)
-    t2d_params = dataclasses.replace(t2d_params, Ipb=Ip_ss, Ilb=Il_ss)
+    t2d_params = calibration.calibrate_t2d_pump(t2d_params)
 
     # Safety validation for T2D
     assert 0.2 <= t2d_params.beta_cell_function <= 0.3, f"Invalid T2D beta-cell function: {t2d_params.beta_cell_function}"
@@ -801,9 +729,7 @@ def adapt_params_for_t2d_no_pump(
         params, **presets.t2d_no_pump_overrides(base_params, ACCEPTANCE_PROB_DEFAULT)
     )
 
-    Ip_ss, Il_ss = _steady_state_insulin_from_Sb(params)
-    params = dataclasses.replace(params, Ipb=Ip_ss, Ilb=Il_ss)
-    params = autobalance_basal_t2d(params)
+    params = calibration.calibrate_t2d_no_pump(params)
 
     # Safety validation for T2D no-pump
     assert not params.use_pump, "SAFETY: T2D no-pump must not use pump"
@@ -860,25 +786,8 @@ def _mu_per_l(Ib_raw: float) -> float:
 
 
 def _steady_state_insulin_from_Sb(params: PatientParams) -> tuple[float, float]:
-    """
-    Compute fasting plasma and liver insulin masses implied by the current basal secretion.
-    Mirrors the linear two-compartment equilibrium used for Hovorka/UVA calibration.
-    """
-    S_endog = 6.0 * float(params.Sb_per_kg)
-    if S_endog <= 0.0:
-        return 0.0, 0.0
-
-    m1 = float(params.m1)
-    m2 = float(params.m2)
-    m4 = float(params.m4)
-    m30 = float(params.m30)
-
-    denom_sec = (m1 + m30) - (m2 * m1) / max(m2 + m4, 1e-8)
-    denom_sec = max(denom_sec, 1e-8)
-
-    Il_ss = S_endog / denom_sec
-    Ip_ss = (m1 / max(m2 + m4, 1e-8)) * Il_ss
-    return float(Ip_ss), float(Il_ss)
+    """Compatibility entry point for the legacy factory insulin calibration."""
+    return calibration._steady_state_insulin_from_Sb(params)
 
 
 def _almost_equal(a: float, b: float, tol: float = 1e-9) -> bool:

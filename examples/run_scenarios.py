@@ -1,11 +1,13 @@
 import sys
 import os
-# Add project root to sys.path to allow imports from envs.*
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+# Prefer this checkout when running the script directly from source.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 
 import argparse
 import dataclasses
 import logging
+import json
+import tempfile
 from typing import Optional, Tuple, Callable
 
 import jax
@@ -15,15 +17,15 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import pandas as pd
 
-from glucobench.simglucose.core.params import PatientParams, create_env_params, NoiseConfig
-from glucobench.simglucose.physiology.initialization import tune_initial_state
-from glucobench.simglucose.physiology.glucose_dynamics import (
+from glucosim.simglucose.core.params import PatientParams, create_env_params, NoiseConfig
+from glucosim.simglucose.physiology.initialization import tune_initial_state
+from glucosim.simglucose.physiology.glucose_dynamics import (
     t1d_rk4_step,
     t2d_rk4_step,
     hovorka_t1d,
     hybrid_t2d,
 )
-from glucobench.simglucose.core.types import PatientType
+from glucosim.simglucose.core.types import PatientType
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,8 +51,13 @@ def simulate(
     """
     Unified simulation loop for T1D and T2D models.
     """
-    num_steps = int(t_span_min / dt_min)
-    times = np.linspace(0, t_span_min, num_steps + 1)
+    if not np.isfinite(dt_min) or dt_min <= 0:
+        raise ValueError("dt_min must be finite and positive")
+    if not np.isfinite(t_span_min) or t_span_min < 0:
+        raise ValueError("t_span_min must be finite and nonnegative")
+    # Include a final remainder step; timestamps are actual elapsed minutes.
+    times = np.append(np.arange(0.0, t_span_min, dt_min), t_span_min)
+    num_steps = len(times) - 1
     states = np.zeros((num_steps + 1, x0.shape[0]), dtype=float)
     states[0] = np.array(x0)
 
@@ -72,6 +79,7 @@ def simulate(
 
     for i in range(num_steps):
         t = times[i]
+        step_dt = times[i + 1] - t
         action = action_fn(t)  # [carb, insulin, hr_reserve]
         carb = float(action[0])
 
@@ -81,21 +89,21 @@ def simulate(
             last_foodtaken = 0.0
             logger.debug(f"New meal at t={t:.1f} min: last_Qsto={last_Qsto:.1f} mg")
 
-        last_foodtaken += carb
+        last_foodtaken += carb * step_dt  # g/min -> grams consumed this step
 
         # Step integration
         key, sk = jax.random.split(key)
         
         if is_t1d:
              x, key, ou_state_dL = step_fn(
-                x=x, dt=dt_min, action=action, params=params,
+                x=x, dt=step_dt, action=action, params=params,
                 last_Qsto=last_Qsto, last_foodtaken=last_foodtaken,
                 t_min=t0_min + t, key=sk, cfg=cfg, ou_state_dL=ou_state_dL
             )
         else:
             # T2D step signature includes day_key
             x, key, ou_state_dL = step_fn(
-                x=x, dt=dt_min, action=action, params=params,
+                x=x, dt=step_dt, action=action, params=params,
                 last_Qsto=last_Qsto, last_foodtaken=last_foodtaken,
                 t_min=t0_min + t, key=sk, cfg=cfg, ou_state_dL=ou_state_dL
             )
@@ -103,7 +111,7 @@ def simulate(
         states[i + 1] = np.array(x)
 
         if carb == 0 and prev_carb > 0:
-            last_foodtaken = 0.0
+            # Retain the meal size for gastric emptying until the next meal.
             logger.debug(f"Meal ended at t={t:.1f} min")
 
         prev_carb = carb
@@ -239,16 +247,16 @@ def plot_states(times: np.ndarray, states: np.ndarray, params: PatientParams, fi
     ax_eff2.set_title('Insulin Effects 2')
     ax_eff2.legend()
 
-    # Insulin kinetics (pmol)
+    # Insulin kinetics (pmol/kg)
     ax_ins_kin = fig.add_subplot(gs[3, 0])
     # Collect for CSV
     csv_data['Il'] = states[:, 9][::log_step]
     csv_data['Isc1'] = states[:, 10][::log_step]
     csv_data['Isc2'] = states[:, 11][::log_step]
-    ax_ins_kin.plot(times_hours, states[:, 9], label='Il (pmol)')
-    ax_ins_kin.plot(times_hours, states[:, 10], label='Isc1 (pmol)')
-    ax_ins_kin.plot(times_hours, states[:, 11], label='Isc2 (pmol)')
-    ax_ins_kin.set_ylabel('Insulin (pmol)')
+    ax_ins_kin.plot(times_hours, states[:, 9], label='Il (pmol/kg)')
+    ax_ins_kin.plot(times_hours, states[:, 10], label='Isc1 (pmol/kg)')
+    ax_ins_kin.plot(times_hours, states[:, 11], label='Isc2 (pmol/kg)')
+    ax_ins_kin.set_ylabel('Insulin (pmol/kg)')
     ax_ins_kin.set_title('Insulin Kinetics')
     ax_ins_kin.legend()
 
@@ -265,22 +273,22 @@ def plot_states(times: np.ndarray, states: np.ndarray, params: PatientParams, fi
     ax_Q.set_title('Glucose Compartments')
     ax_Q.legend()
 
-    # Gut glucose (Gsc mmol)
+    # Filtered subcutaneous glucose (mmol/kg)
     Gsc_mmol_per_kg = states[:, 12] / 180.0
 
     ax_Gsc = fig.add_subplot(gs[4, 0])
     # Collect for CSV
     csv_data['Gsc'] = Gsc_mmol_per_kg[::log_step]
-    ax_Gsc.plot(times_hours, Gsc_mmol_per_kg, label='Gsc (mmol)')
-    ax_Gsc.set_ylabel('Gut Glucose (mmol)')
-    ax_Gsc.set_title('Delayed Gut Glucose')
+    ax_Gsc.plot(times_hours, Gsc_mmol_per_kg, label='Gsc (mmol/kg)')
+    ax_Gsc.set_ylabel('Glucose (mmol/kg)')
+    ax_Gsc.set_title('Filtered Subcutaneous Glucose')
     ax_Gsc.legend()
 
     # Exercise states (zero in tests)
     ax_ex = fig.add_subplot(gs[4, 1])
-    ax_ex.plot(times_hours, states[:, 13], label='E1 (HR)')
+    ax_ex.plot(times_hours, states[:, 13], label='E1 (bpm)')
     ax_ex.plot(times_hours, states[:, 14], label='T_E (min)')
-    ax_ex.plot(times_hours, states[:, 15], label='E2 (effect)')
+    ax_ex.plot(times_hours, states[:, 15], label='E2 (min)')
     ax_ex.set_ylabel('Exercise States')
     ax_ex.set_title('Exercise Model')
     ax_ex.legend()
@@ -290,7 +298,6 @@ def plot_states(times: np.ndarray, states: np.ndarray, params: PatientParams, fi
         ax.set_xlabel('Time (hours)')
         ax.grid(True, linestyle='--', alpha=0.7)
 
-    plt.tight_layout()
     if fig_path:
         plt.savefig(fig_path, dpi=300, bbox_inches='tight')
         logger.info(f"Plot saved to {fig_path}")
@@ -303,6 +310,35 @@ def plot_states(times: np.ndarray, states: np.ndarray, params: PatientParams, fi
         df_csv.to_csv(csv_path, index=False)
         logger.info(f"CSV data saved to {csv_path}")
         logger.info(f"CSV contains {len(df_csv)} rows (every 60 indexes) with columns: {list(df_csv.columns)}")
+
+
+def save_glucose_gif(times, states, params, path):
+    """Animate plasma glucose using at most 120 frames; no ffmpeg required."""
+    from matplotlib.animation import FuncAnimation, PillowWriter
+
+    hours = times / 60.0
+    glucose = states[:, 3] / params.Vg
+    fig, ax = plt.subplots(figsize=(8, 4), constrained_layout=True)
+    ax.set(xlabel="Time (hours)", ylabel="Plasma glucose (mg/dL)",
+           xlim=(0, max(float(hours[-1]), 1 / 60)),
+           ylim=(min(40, float(glucose.min()) - 10),
+                 max(400, float(glucose.max()) + 10)))
+    ax.axhspan(GLUCOSE_HYPOGLYCEMIA_THRESHOLD,
+               GLUCOSE_HYPERGLYCEMIA_THRESHOLD, color="green", alpha=0.1)
+    line, = ax.plot([], [], label="Plasma glucose")
+    ax.legend()
+
+    def update(index):
+        line.set_data(hours[:index + 1], glucose[:index + 1])
+        return (line,)
+
+    frames = np.linspace(0, len(times) - 1, min(120, len(times)), dtype=int)
+    animation = FuncAnimation(fig, update, frames=frames, interval=100)
+    try:
+        animation.save(path, writer=PillowWriter(fps=10), dpi=100)
+    finally:
+        plt.close(fig)
+    logger.info(f"GIF saved to {path}")
 
 
 # --- Scenarios ---
@@ -329,7 +365,6 @@ def get_bolus_scenario(start_time=5.0, duration=1.0, amount_u=5.0):
     return action
 
 def get_exercise_scenario(params: PatientParams):
-    basal_u_min = params.basal / 60.0
     def action(t):
         # 50 min ramp up, 30 min steady, 50 min ramp down
         hr_reserve = 0.0
@@ -340,9 +375,128 @@ def get_exercise_scenario(params: PatientParams):
         elif 140 <= t < 190:
             hr_reserve = 0.5 * (1.0 - (t - 140) / 50.0)
         
-        # Keep basal on during exercise
-        return jnp.array([0.0, basal_u_min, hr_reserve])
+        # The ODE already supplies basal insulin; the action is additional insulin.
+        return jnp.array([0.0, 0.0, hr_reserve])
     return action
+
+
+def get_meal_bolus_scenario(meal_g, bolus_u):
+    """A 15-minute meal at minute 30, with a one-minute SC bolus at minute 30."""
+    meal = get_meal_scenario(start_time=30., duration=15., amount_g=meal_g)
+    bolus = get_bolus_scenario(start_time=30., duration=1., amount_u=bolus_u)
+    return lambda t: meal(t) + bolus(t)
+
+
+def response_metrics(times, states, params, horizon_min):
+    """Time-weighted plasma-glucose diagnostics; incomplete runs are ineligible."""
+    glucose = np.asarray(states[:, 3] / params.Vg)
+    finite = bool(np.isfinite(states).all() and np.isfinite(glucose).all())
+    complete = bool(finite and np.isclose(times[-1], horizon_min, rtol=0, atol=1e-6))
+    widths = np.diff(times)
+    duration = float(times[-1] - times[0])
+    # Trapezoidal area; interval endpoint average for time-in-range indicators.
+    def area(values):
+        return float(np.sum(.5 * (values[:-1] + values[1:]) * widths))
+    if not finite or duration <= 0:
+        return dict(complete=False, eligible=False, min_mgdl=np.nan, peak_mgdl=np.nan,
+                    final_mgdl=np.nan, tir_70_180_pct=np.nan, below_70_min=np.nan,
+                    hyper_auc_mgdl_min=np.nan, simulated_min=duration)
+    return dict(
+        complete=complete, eligible=complete and bool(np.min(glucose) >= 70.),
+        min_mgdl=float(np.min(glucose)), peak_mgdl=float(np.max(glucose)),
+        final_mgdl=float(glucose[-1]),
+        tir_70_180_pct=100. * area(((glucose >= 70.) & (glucose <= 180.)).astype(float)) / duration,
+        below_70_min=area((glucose < 70.).astype(float)),
+        hyper_auc_mgdl_min=area(np.maximum(glucose - 180., 0.)), simulated_min=duration,
+    )
+
+
+def select_bolus(rows):
+    """Lowest hyperglycemic area among complete, non-hypoglycemic candidates.
+
+    Ties favor the smaller bolus. This is retrospective simulator selection,
+    not a clinical recommendation or an online controller.
+    """
+    eligible = [row for row in rows if row['eligible']]
+    return min(eligible, key=lambda row: (row['hyper_auc_mgdl_min'], row['bolus_u'])) if eligible else None
+
+
+def run_suite(args):
+    """Cross diabetes type x meal size x bolus grid, using deterministic physiology."""
+    types = ('t1d', 't2d', 't2d_no_pump')
+    meals = sorted(set(args.meals))
+    doses = sorted(set([0.] + args.boluses))
+    horizon = args.hours * 60.
+    if not np.isfinite(horizon) or horizon < 60.:
+        raise ValueError('Suite --hours must be finite and at least 1 (default: 6)')
+    if not meals or any(not np.isfinite(g) or g <= 0 for g in meals):
+        raise ValueError('--meals must contain finite positive grams')
+    if any(not np.isfinite(u) or u < 0 for u in doses):
+        raise ValueError('--boluses must contain finite nonnegative units')
+    os.makedirs(args.output_dir, exist_ok=True)
+    # Preserve earlier experiment outputs on repeated invocations.
+    output = tempfile.mkdtemp(prefix='meal_bolus_', dir=args.output_dir)
+    rows, recommendations, traces = [], [], []
+    fig, axes = plt.subplots(len(types), len(meals), figsize=(5 * len(meals), 10),
+                             squeeze=False, constrained_layout=True)
+    config = dict(seed=args.seed, hours=args.hours, patient=args.name or 'adolescent#001',
+                  types=types, meal_grams=meals, candidate_bolus_units=doses,
+                  meal_start_min=30, meal_duration_min=15, bolus_duration_min=1,
+                  physiology_only=True, glucose_source='plasma',
+                  selection='Complete horizon, min glucose >=70; minimize AUC above 180; tie: smaller dose')
+    with open(os.path.join(output, 'config.json'), 'w') as file:
+        json.dump(config, file, indent=2)
+    try:
+        for type_index, kind in enumerate(types):
+            env, x0 = tune_initial_state(create_env_params(patient_name=config['patient'], diabetes_type=kind))
+            p = env.patient_params
+            cfg = _physiology_only_config(env.noise_config)
+            allowed = [u for u in doses if u <= p.max_bolus_U]
+            def evaluate(meal, dose):
+                times, states = simulate(horizon, 1., x0, get_meal_bolus_scenario(meal, dose),
+                                         p, cfg, jax.random.PRNGKey(args.seed))
+                metrics = response_metrics(times, states, p, horizon)
+                row = dict(diabetes_type=kind, patient=config['patient'], meal_g=meal,
+                           bolus_u=dose, seed=args.seed, BW_kg=float(p.BW),
+                           basal_u_hr=float(p.basal), **metrics)
+                rows.append(row)
+                traces.append(pd.DataFrame(dict(diabetes_type=kind, meal_g=meal, bolus_u=dose,
+                                               time_min=times, plasma_mgdl=states[:, 3] / p.Vg)))
+                return row, times, states
+            _, basal_times, basal_states = evaluate(0., 0.)
+            for meal_index, meal in enumerate(meals):
+                candidates = [evaluate(meal, dose) for dose in allowed]
+                chosen = select_bolus([item[0] for item in candidates])
+                recommendations.append(dict(diabetes_type=kind, meal_g=meal,
+                    recommended_bolus_u=chosen['bolus_u'] if chosen else np.nan,
+                    status='selected_on_simulated_grid' if chosen else 'no_eligible_dose',
+                    tested_doses_u=';'.join(map(str, allowed)),
+                    hyper_auc_mgdl_min=chosen['hyper_auc_mgdl_min'] if chosen else np.nan))
+                ax = axes[type_index, meal_index]
+                ax.axhspan(70, 180, color='green', alpha=.08)
+                ax.axvline(.5, color='gray', linewidth=.8)
+                ax.plot(basal_times / 60., basal_states[:, 3] / p.Vg, ':', label='No meal / no bolus')
+                _, times, states = candidates[0]  # zero dose is always included
+                ax.plot(times / 60., states[:, 3] / p.Vg, label='Meal / no bolus')
+                if chosen is not None:
+                    _, times, states = next(item for item in candidates if item[0] is chosen)
+                    ax.plot(times / 60., states[:, 3] / p.Vg, '--', label=f"Selected {chosen['bolus_u']:g} U")
+                    if args.gif:
+                        save_glucose_gif(times, states, p, os.path.join(output, f'{kind}_meal_{meal:g}g.gif'))
+                else:
+                    ax.text(.02, .96, 'No eligible dose', transform=ax.transAxes, va='top')
+                ax.set(title=f'{kind}: {meal:g} g', xlabel='Time (hours)', ylabel='Plasma glucose (mg/dL)')
+                ax.legend(fontsize=8)
+        fig.suptitle('Meal and bolus response — deterministic simulator grid search')
+        fig.savefig(os.path.join(output, 'comparison.png'), dpi=150)
+        pd.DataFrame(rows).to_csv(os.path.join(output, 'candidate_metrics.csv'), index=False)
+        pd.DataFrame(recommendations).to_csv(os.path.join(output, 'recommendations.csv'), index=False)
+        pd.concat(traces, ignore_index=True).to_csv(os.path.join(output, 'glucose_traces.csv'), index=False)
+    finally:
+        plt.close(fig)
+    print(f'Saved {len(rows)} simulations and {len(recommendations)} meal comparisons to {output}')
+    print('Bolus selections are retrospective simulator results, not patient dosing advice.')
+    return output
 
 
 def main():
@@ -350,11 +504,20 @@ def main():
     parser.add_argument("--type", type=str, choices=["t1d", "t2d", "t2d_no_pump"], default="t1d", help="Patient Type")
     parser.add_argument("--name", type=str, default=None, help="Patient Name (e.g. adolescent#001)")
     parser.add_argument("--scenario", type=str, choices=["basal", "meal", "bolus", "exercise"], default="basal", help="Simulation Scenario")
-    parser.add_argument("--hours", type=float, default=24.0, help="Simulation duration in hours")
+    parser.add_argument("--hours", type=float, default=None, help="Simulation hours (default: 24 single / 6 suite)")
     parser.add_argument("--output_dir", type=str, default="results", help="Directory to save results")
+    parser.add_argument("--gif", action="store_true", help="Also save an animated plasma-glucose GIF in --output_dir")
     parser.add_argument("--physiology_only", action="store_true", help="Disable all realism noise/jitter for sanity checks")
     
+    parser.add_argument('--suite', action='store_true', help='Compare all three diabetes types across meals and bolus doses; deterministic physiology')
+    parser.add_argument('--meals', type=float, nargs='+', default=[30., 60., 90.], help='Suite meal sizes in grams')
+    parser.add_argument('--boluses', type=float, nargs='+', default=[0., 2., 4., 6., 8., 10.], help='Suite bolus grid in U; zero always included, values above patient max excluded')
+    parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+    args.hours = args.hours if args.hours is not None else (6. if args.suite else 24.)
+    if args.suite:
+        run_suite(args)
+        return
 
     # Defaults
     default_names = {
@@ -381,13 +544,8 @@ def main():
 
     # Select Scenario
     if args.scenario == "basal":
-        # For basal test, ensure basal insulin is delivered if pump is used
-        if params.use_pump:
-             def basal_action(t):
-                 return jnp.array([0.0, params.basal/60.0, 0.0])
-             action_fn = basal_action
-        else:
-             action_fn = get_zero_action()
+        # Basal insulin is added by the ODE, not by the action.
+        action_fn = get_zero_action()
     elif args.scenario == "meal":
         action_fn = get_meal_scenario(amount_g=75.0)
     elif args.scenario == "bolus":
@@ -401,7 +559,7 @@ def main():
     # Run Simulation
     os.makedirs(args.output_dir, exist_ok=True)
     t_span = args.hours * 60.0
-    key = jax.random.PRNGKey(42)
+    key = jax.random.PRNGKey(args.seed)
     
     times, states = simulate(
         t_span_min=t_span,
@@ -421,6 +579,9 @@ def main():
         csv_path=os.path.join(args.output_dir, f"{base_name}.csv"),
         log_step=10
     )
+    if args.gif:
+        save_glucose_gif(times, states, params,
+                         os.path.join(args.output_dir, f"{base_name}.gif"))
 
 if __name__ == "__main__":
     main()

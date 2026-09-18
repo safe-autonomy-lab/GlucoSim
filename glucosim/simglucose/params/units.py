@@ -1,32 +1,24 @@
-"""
-x0_1, x0_2, x0_3	mg	Carbohydrate amounts in the gut/stomach compartments.
-x0_4, x0_5	mg/dL	Glucose concentrations (Plasma, Tissue). Values like 250 are typical for mg/dL.
-x0_6, x0_10	pmol	Insulin amounts in plasma and liver compartments.
-x0_7, x0_8, x0_9	pmol/L	Insulin concentrations (remote action signals), matching the Ib value.
-x0_11, x0_12	pmol	Insulin amounts in the subcutaneous depots.
-x0_13	mg/dL	CGM glucose concentration, matching the plasma glucose value.
-BW	kg	Body Weight.
-EGPb	mg/kg/min	Basal Endogenous Glucose Production rate.
-Gb, Gpb, Gtb	mg/dL	Basal glucose concentrations (Blood, Plasma, Tissue).
-Ib	pmol/L	Basal Insulin concentration.
-Vg	dL/kg	Volume of glucose distribution (deciliters per kilogram).
-Vi	L/kg	Volume of insulin distribution (liters per kilogram).
-kabs, kmax, kmin	1/min	Rate constants for meal absorption.
-k1, k2	1/min	Rate constants for glucose transport between compartments.
-ka1, ka2, kd, ksc	1/min	Rate constants for subcutaneous insulin absorption dynamics.
-m1, m2, m30, m4,	1/min	Rate constants for insulin kinetics.
-m5  min*kg/pmol	Rate constants for insulin kinetics.
-ki, p2u	1/min	Rate constants for insulin action.
-ke1	1/min	Rate constant for renal glucose excretion.
-ke2	mg/dL	Renal threshold for glucose excretion.
-Km0	mg/kg	Michaelis-Menten constant (a concentration).
-Ipb, Ilb	pmol/kg 	Basal insulin amounts in plasma and liver.
-Vmx, Vm0	mg/kg/min per pmol/l	Michaelis-Menten maximum velocity rates for glucose uptake.
-Fsnc, Rdb, PCRb, kp1	mg/kg/min	Various rates of glucose production or disposal.
-b, d, f, HEb	dimensionless	Fractions or bioavailability parameters.
-CL	L/min	Insulin clearance rate.
-kp2, kp3	Model Coefficients	Units depend on the exact EGP equation formulation (e.g., (mg/kg/min)/(mg/dL)).
-u2ss	U/min	Steady-state basal insulin infusion rate.
-isc1ss, isc2ss	pmol	Steady-state subcutaneous insulin amounts.
-dosekempt	pmol	A total insulin dose amount (90,000 pmol = 15 U).
+"""Units of the implemented simulator (time in minutes).
+
+Gut states 0:3: whole-patient carbohydrate mass, mg.
+Glucose states Gp, Gt, Gsc: mg/kg; Gp/Vg is mg/dL.
+Insulin states Ip, Il, Isc1, Isc2: pmol/kg; Ip/Vi is pmol/L.
+T1D remote states: pmol/L (x1 is an offset); T2D remote states: dimensionless.
+Exercise E1: bpm; T_E and E2: min. Secretion Y: mU/min; filtered Gf: mM.
+
+BW: kg. Vg: dL/kg. Vi: L/kg. Gb: mg/dL. Gpb/Gtb: mg/kg.
+Ipb/Ilb: pmol/kg. Ib: pmol/L. ke2 and Km0: mg/kg.
+Vm0, Fsnc, EGPb, kp1: mg/(kg*min).
+Vmx, kp3: (mg/(kg*min))/(pmol/L). kp2: 1/min.
+ki, p2u and kinetic rate constants: 1/min.
+Raw CSV u2ss: pmol/(kg*min); pump basal: U/hr.
+ODE carbohydrate input: g/min; additional insulin input: U/min.
+Glucose uses 180 mg/mmol (18 mg/dL per mM); insulin uses 6000 pmol/U.
+
+Empirical gain definitions for the existing equations:
+c1, c2: min; alpha_QE: mg/(kg*min^3); beta_ex: mg/(kg*min).
+beta_s: mU/(min^2*mM); K_deriv: mU/(min*mM); alpha_s: 1/min.
+S_I1/S_I2/S_I3: L/(mU*min); Sb_per_kg: mU/(kg*min).
+These conventions do not assert clinical calibration or published-model equivalence.
+See PatientParams.UNITS for the parameter registry.
 """

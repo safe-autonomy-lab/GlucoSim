@@ -53,23 +53,23 @@ def patient_step(
     # Consume at the per-minute rate derived from the controller interval to avoid overeating.
     to_eat = jnp.minimum(planned_meal, eat_rate_per_min)
     planned_meal -= to_eat
-    # TODO: this is optional, if we want to use exercise model, we should uncomment this
-    # planned_exercise_min = jnp.maximum(state['planned_exercise_min'] - 1.0, 0)
+    planned_exercise_min = jnp.maximum(state['planned_exercise_min'] - 1.0, 0.0)
     
-    is_eating = jnp.where(is_new_meal | (planned_meal > 0), 1, 0)
+    is_eating = jnp.where(to_eat > 0, 1, 0)
     last_Qsto = jax.lax.cond(is_new_meal,
                              lambda: patient_state[0] + patient_state[1],
                              lambda: state['last_Qsto'])
-    last_foodtaken = jax.lax.cond(is_eating == 1,
-                                  lambda: state['last_foodtaken'] + to_eat,
-                                  lambda: 0.0)
+    # Gastric emptying needs the complete meal size until the next meal,
+    # including the final bite even when no food remains to be eaten.
+    last_foodtaken = jnp.where(is_new_meal, 0.0, state['last_foodtaken']) + to_eat
 
     # Add meal mass explicitly to D1 (index 0) to ensure conservation (Impulse method)
     # This avoids numerical integration errors from treating meal as a rate over dt.
     # D1 is in mg, to_eat is in g.
     patient_state_ode = patient_state.at[0].add(to_eat * 1000.0)
 
-    # The ODE (iir_exogenous_pmolkgmin) adds params.basal automatically.
+    # The ODE adds pump basal automatically. This boundary advances exactly one
+    # minute, so bolus_U / 1 minute is the additional insulin rate in U/min.
     # Pass 0.0 for meal rate because we handled it as an impulse above.
     ode_action = jnp.array([0.0, bolus_U, ex_intensity], dtype=patient_state.dtype)
     BLOOD_GLUCOSE_DYNAMICS = t1d_rk4_step if params.diabetes_type == PatientType.t1d else t2d_rk4_step
@@ -104,7 +104,7 @@ def patient_step(
         'is_eating': is_eating,
         'to_eat': to_eat,
         'last_Qsto': last_Qsto,
-        'last_foodtaken': jax.lax.cond(planned_meal > 0, lambda: last_foodtaken, lambda: 0.0),
+        'last_foodtaken': last_foodtaken,
         'last_meal_time': jax.lax.cond(is_new_meal, lambda: state['t'], lambda: state['last_meal_time']),
         'last_bolus_time': jax.lax.cond(bolus_U > 0, lambda: state['t'], lambda: state['last_bolus_time']),
         't': state['t'] + 1,
@@ -113,8 +113,7 @@ def patient_step(
         'cgm_last': cgm_now,
         'cgm_trend': cgm_trend,
         'cgm_scale': cgm_scale,
-        # TODO: this is optional, if we want to use exercise model, we should uncomment this
-        'planned_exercise_min': 0.0,
+        'planned_exercise_min': planned_exercise_min,
         'exercise_intensity': state.get('exercise_intensity', 0.0),
         'exercise_count': state.get('exercise_count', 0),
         'last_exercise_time': state.get('last_exercise_time', -999),

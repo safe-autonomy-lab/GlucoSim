@@ -48,7 +48,7 @@ class PatientParams:
     EGPb: float  # mg/kg/min
     Gb:   float  # mg/dL
     Ib:   float  # pmol/L
-    u2ss: float  # U/min (per-patient steady pump basal proxy)
+    u2ss: float  # pmol/kg/min (raw CSV basal infusion)
     Vg:   float  # dL/kg
     Vi:   float  # L/kg
     V_G_L: float # L (absolute glucose distribution vol; may be derived)
@@ -85,7 +85,7 @@ class PatientParams:
     Vm0: float   # mg/kg/min
     Km0: float   # mg/kg
     p2u: float   # 1/min (legacy, if using Ki/p2u style effects)
-    ki:  float   # mg/kg/min (legacy delay parameter for EGP/uptake couplings)
+    ki:  float   # 1/min (insulin-effect filter rate)
 
     # -------------------- Glucose Kinetics --------------------
     kp1: float   # mg/kg/min (EGP at zero G and I) — only if using linear EGP form
@@ -104,8 +104,8 @@ class PatientParams:
     tau_HR: float    # min
     alpha_HR: float  # -
     n_power: float   # -
-    c1: float        # -
-    c2: float        # -
+    c1: float        # min
+    c2: float        # min
     tau_ex: float    # min
     tau_in: float    # min
 
@@ -131,9 +131,9 @@ class PatientParams:
     MwG_mg_per_mmol: float = 180.0        # mg/mmol
     tau_S: float = 55.0                   # min
     gamma: float = 0.2                    # 1/min (secretion dyn if used)
-    K_deriv: float = 0.0                 # mU/mM
+    K_deriv: float = 0.0                 # mU/(min·mM)
     alpha_s: float = 0.05                 # 1/min
-    beta_s: float = 1.0                   # mU/(min·mM)
+    beta_s: float = 1.0                   # mU/(min²·mM); forcing gain, not steady secretion gain
     h: float = 6.0                        # mM
     Sb_per_kg: float = 0.02               # mU/(kg·min)
     V_I: float = 0.05                     # L (will be scaled by BW externally if used)
@@ -145,7 +145,7 @@ class PatientParams:
     S_I2: float = 0.0081                  # (1/min) per (mU/L)
     S_I3: float = 0.00520                 # (1/min) per (mU/L)
     beta_ex: float = 0.2                 # mg/kg/min
-    alpha_QE: float = 0.004                 # 1/min
+    alpha_QE: float = 0.004                 # mg/(kg·min³), with E2 measured in minutes
     m6: float = 0.0                       # - (HE dynamics intercept if used)
     V_G: float = 0.0                      # L (absolute glucose distribution vol)
     EGP_0: float = 0.0                    # mmol/min (base EGP if using x3-suppressed EGP path)
@@ -156,7 +156,7 @@ class PatientParams:
     # -------------------- Units/Descriptions registry --------------------
     UNITS: ClassVar[Dict[str, Unit]] = {
         # Core
-        "BW":"kg","EGPb":"mg/kg/min","Gb":"mg/dL","Ib":"pmol/L","u2ss":"U/min",
+        "BW":"kg","EGPb":"mg/kg/min","Gb":"mg/dL","Ib":"pmol/L","u2ss":"pmol/kg/min",
         "Vg":"dL/kg","Vi":"L/kg","V_G_L":"L","V_I_L":"L","Ipb":"pmol/kg","Ilb":"pmol/kg",
         "Gpb":"mg/kg","Gtb":"mg/kg","Fsnc":"mg/kg/min",
         # Meal
@@ -170,7 +170,7 @@ class PatientParams:
         "kp1":"mg/kg/min","kp2":"1/min","kp3":"(mg/kg/min)/(pmol/L)",
         "k1":"1/min","k2":"1/min","ke1":"1/min","ke2":"mg/kg","Rdb":"(TBD)","PCRb":"(TBD)",
         # Exercise
-        "age":"y","HR0":"bpm","tau_HR":"min","alpha_HR":"-","n_power":"-","c1":"-","c2":"-",
+        "age":"y","HR0":"bpm","tau_HR":"min","alpha_HR":"-","n_power":"-","c1":"min","c2":"min",
         "tau_ex":"min","tau_in":"min",
         # Behavior
         "eat_rate":"g/min","meal_acceptance_prob":"-","use_pump":"bool","bolus_acceptance_prob":"-",
@@ -178,10 +178,10 @@ class PatientParams:
         "bolus_safe_window":"min","max_bolus_U":"U","max_meal_g":"g","max_exercise_min":"min","basal":"U/hr",
         # T2D hybrid
         "A_G":"-","tau_D":"min","MwG_mg_per_mmol":"mg/mmol","tau_S":"min","gamma":"1/min",
-        "K_deriv":"mU/mM","alpha_s":"1/min","beta_s":"mU/(min·mM)","h":"mM",
+        "K_deriv":"mU/(min·mM)","alpha_s":"1/min","beta_s":"mU/(min²·mM)","h":"mM",
         "Sb_per_kg":"mU/(kg·min)","V_I":"L","k_a1":"1/min","k_a2":"1/min","k_a3":"1/min",
         "S_I1":"(1/min)/(mU/L)","S_I2":"(1/min)/(mU/L)","S_I3":"(1/min)/(mU/L)",
-        "beta_ex":"mg/kg/min","alpha_QE":"1/min","m6":"-","V_G":"L","EGP_0":"mmol/min",
+        "beta_ex":"mg/kg/min","alpha_QE":"mg/(kg·min³)","m6":"-","V_G":"L","EGP_0":"mmol/min",
         "F_cns0":"mmol/min","k12":"1/min","F01":"mmol/min",
         "patient_name":"-"
     }
@@ -614,6 +614,14 @@ def create_patient_params(patient_name: str,
         patient_params = dataclasses.replace(patient_params, **override_params)
         logger.info(f"Applied {len(override_params)} parameter overrides: {list(override_params.keys())}")
 
+    # Reject invalid exercise time scales before tracing the ODE with JAX.
+    for name in ("tau_HR", "tau_ex", "tau_in", "c2", "HR0", "alpha_HR", "n_power"):
+        value = getattr(patient_params, name)
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} must be finite and positive")
+    if not np.isfinite(patient_params.c1) or patient_params.c1 < 0:
+        raise ValueError("c1 must be finite and nonnegative")
+
     logger.info(f"Applied {diabetes_type} adaptations to patient {patient_name}")
 
     return patient_params
@@ -736,7 +744,7 @@ def adapt_params_for_t1d(
         meal_safe_window=60.0,  # minutes
         bolus_safe_window=60.0,  # minutes
 
-        # Proxy basal rate from t1dpatient.py
+        # Empirical T1D basal proxy (U/hr); the target-balance formula is T2D-only.
         basal=params.BW * 0.011,  # U/h
     )
     # Autobalance the basal rate, with optional weakening to expose harsher dynamics
@@ -817,20 +825,20 @@ def adapt_params_for_t2d(
         Ipb=temp_params.Ipb * config['Ipb_factor'],
         Ilb=temp_params.Ilb * config['Ipb_factor'],  # Scale liver insulin to maintain equilibrium ratio
         HEb=temp_params.HEb * config['HEb_factor'],
+        # Select resistance before converting the unscaled insulin-effect gains.
+        insulin_resistance_factor=2.5,
     )
 
     # Convert to T2D format using comprehensive conversion logic
     t2d_params = patient_to_t2d_params(temp_params, use_dynamic_HE=False)
-    clearance_mU_per_min = (t2d_params.m2 + t2d_params.m4) * (t2d_params.Ib * t2d_params.Vi * t2d_params.BW / 6.0)
-    total_insulin_need_U_per_hr = (clearance_mU_per_min * 60) / 1000
-
-    # 2. Calculate the insulin the patient produces naturally (in U/hr)
-    # This is the systemic portion of the basal endogenous secretion.
-    portal_secretion_U_per_hr = (t2d_params.Sb_per_kg * t2d_params.BW * 60) / 1000
-    endogenous_supply_U_per_hr = portal_secretion_U_per_hr * (1 - t2d_params.HEb)
-
-    # 3. The pump's basal rate is the difference
-    basal_rate = max(0.0, total_insulin_need_U_per_hr - endogenous_supply_U_per_hr)
+    # Target Ib under the implemented plasma/liver balance, including return flow.
+    liver_return = t2d_params.m1 / (t2d_params.m1 + t2d_params.m30)
+    clearance = t2d_params.m2 + t2d_params.m4 - liver_return * t2d_params.m2
+    required_pmolkgmin = (clearance * t2d_params.Ib * t2d_params.Vi
+                         - liver_return * 6.0 * t2d_params.Sb_per_kg)
+    # A pump cannot remove insulin: excessive endogenous supply gives zero basal
+    # and an achieved insulin concentration above the target.
+    basal_rate = max(0.0, required_pmolkgmin * t2d_params.BW * 60.0 / 6000.0)
 
     # Apply T2D-specific behavioral and physiological parameters
     t2d_params = dataclasses.replace(
@@ -858,7 +866,7 @@ def adapt_params_for_t2d(
         max_bolus_U=10.0,
         max_meal_g=100.0,
 
-        # Proxy basal rate
+        # Basal targeting Ib under the two-pool insulin balance
         basal=basal_rate,  # U/h
     )
 
@@ -929,13 +937,10 @@ def adapt_params_for_t2d_no_pump(
     Returns:
         Adapted PatientParams for T2D patient without pump
     """
-    # Start with T2D pump adaptations
+    # Apply scaling only after the final no-pump basal calibration below.
     params = adapt_params_for_t2d(
         base_params,
         config,
-        carb_absorption_scale=carb_absorption_scale,
-        insulin_sensitivity_scale=insulin_sensitivity_scale,
-        eat_rate_scale=eat_rate_scale,
     )
 
     logger.info("Adapting parameters for Type 2 Diabetes (no pump)")
@@ -949,6 +954,10 @@ def adapt_params_for_t2d_no_pump(
 
         # Higher insulin resistance (injection site variability)
         insulin_resistance_factor=2.8,
+        # Recompute from the original gains, not the already-scaled pump gains.
+        S_I1=base_params.S_I1 / 2.8,
+        S_I2=base_params.S_I2 / 2.8,
+        S_I3=base_params.S_I3 / 2.8,
 
         # For now, full acceptance to simplify learning
         bolus_acceptance_prob=ACCEPTANCE_PROB_DEFAULT,
@@ -981,7 +990,7 @@ def adapt_params_for_t2d_no_pump(
     logger.debug(f"T2D no-pump adaptations: IR_factor={params.insulin_resistance_factor:.1f}, "
                 f"max_bolus={params.max_bolus_U:.1f}U, adherence={params.bolus_acceptance_prob:.2f}")
 
-    # Re-apply scaling after the no-pump autobalance step
+    # Apply scaling once, after the no-pump autobalance step.
     if carb_absorption_scale != 1.0:
         params = dataclasses.replace(
             params,
@@ -1004,7 +1013,7 @@ def adapt_params_for_t2d_no_pump(
 
 def _mgdl_to_mM(g_mgdl: float) -> float:
     """Convert glucose from mg/dL to mM."""
-    return g_mgdl * 0.0555
+    return g_mgdl / 18.0  # inverse of _mM_to_mgdl, using 180 mg/mmol
 
 def _mM_to_mgdl(G_mM: float) -> float:
     """Convert glucose from mM to mg/dL."""

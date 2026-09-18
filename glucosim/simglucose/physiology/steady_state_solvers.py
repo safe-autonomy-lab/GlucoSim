@@ -44,15 +44,26 @@ def tune_kp1_to_EGPb(params: PatientParams, x0: jnp.ndarray) -> float:
     I_pmolL = Ip / Vi
     return float(params.EGPb + params.kp2 * Gp + params.kp3 * I_pmolL)
 
+def tissue_glucose_steady_state(params: PatientParams, Gp: float, I_pmolL: float) -> float:
+    """Positive root of k1*Gp - k2*Gt - (Vm0+Vmx*I)*Gt/(Km0+Gt) = 0."""
+    inflow = params.k1 * float(Gp)
+    k2 = max(params.k2, 1e-8)
+    b = k2 * params.Km0 + params.Vm0 + params.Vmx * float(I_pmolL) - inflow
+    c = inflow * params.Km0
+    root = (b * b + 4.0 * k2 * c) ** 0.5
+    # Equivalent quadratic roots, chosen to avoid subtractive cancellation.
+    return float(2.0 * c / (b + root) if b > 0 else (root - b) / (2.0 * k2))
+
+
 def egp0_for_target(params: PatientParams, G_target_mM: float, I_target_mU_L: float, iters: int = 10) -> float:
     """
-    Iteratively calibrate EGP_0 so a target fasting (G*, I*) becomes an equilibrium.
+    Calibrate EGP_0 so a target fasting (G*, I*) becomes an equilibrium.
 
-    Based on the hepatic balance used in Dalla Man et al. (2007); the secant loop enforces
+    The tissue equilibrium is solved algebraically; iters is retained for compatibility.
+    Based on the hepatic balance used in Dalla Man et al. (2007), this enforces
     EGP = F_cns + U_id + renal while respecting the x3 suppression used in the hybrid model.
     """
     BW, Vg = params.BW, params.Vg
-    k1, k2 = params.k1, params.k2
     Vm0, Vmx, Km0 = params.Vm0, params.Vmx, params.Km0
     S_I3, k_a3 = params.S_I3, params.k_a3
 
@@ -60,10 +71,7 @@ def egp0_for_target(params: PatientParams, G_target_mM: float, I_target_mU_L: fl
     I_p_pmol_L = I_target_mU_L * 6.0
     Vmt = Vm0 + Vmx * I_p_pmol_L
 
-    Gt = (k1 / max(k2, 1e-8)) * Gp_star
-    for _ in range(int(max(iters, 1))):
-        U_id = Vmt * Gt / (Km0 + Gt)
-        Gt = max((k1 * Gp_star - U_id) / max(k2, 1e-8), 1e-6)
+    Gt = tissue_glucose_steady_state(params, Gp_star, I_p_pmol_L)
 
     F_cns = (params.F_cns0 * 180.0) / BW
     U_id = Vmt * Gt / (Km0 + Gt)

@@ -22,8 +22,8 @@ def hovorka_t1d(
     """
     JAX implementation of the Hovorka/UVA T1D model with optional exercise couplings.
 
-    The glucose subsystem matches Hovorka et al. (2004) while the exercise sinks follow
-    the Visentin et al. (2014) UVA exercise add-on.  Serves as the core vector field for T1D rollouts.
+    Research adaptation with direct insulin effects and empirical exercise sinks.
+    The exercise gains describe the equations below, not a validated published calibration.
     States (indices & units):
       0 D1 [mg], 1 D2 [mg], 2 D3 [mg]
       3 Gp [mg/kg], 4 Gt [mg/kg]
@@ -32,14 +32,14 @@ def hovorka_t1d(
       9 Il [pmol/kg]
      10 Isc1 [pmol/kg], 11 Isc2 [pmol/kg]
      12 Gsc [mg/kg]
-     13 E1 [-], 14 T_E [min], 15 E2 [-]
+     13 E1 [bpm], 14 T_E [min], 15 E2 [min]
      16 Y [mU/min], 17 Gf [mM]
 
     Parameters (key units):
       BW [kg], Vg [dL/kg], Vi [L/kg]
       kmax,kmin,kabs,k1,k2,ka1,ka2,kd,ksc,ki,m1,m2,m30,m4 [1/min]
       f [-], b,d [-]
-      kp1 [mg/kg/min], kp2 [ (mg/kg/min) per (mg/dL) ], kp3 [ (mg/kg/min) per (pmol/L) ]
+      kp1 [mg/kg/min], kp2 [1/min], kp3 [ (mg/kg/min) per (pmol/L) ]
       Fsnc [mg/kg/min]
       Vm0 [mg/kg/min], Vmx [ (mg/kg/min) per (pmol/L) ], Km0 [mg/kg]
       ke1 [1/min], ke2 [mg/kg]
@@ -128,11 +128,11 @@ def hovorka_t1d(
     Q_E1_uptake   = beta_ex * (x[13] / HR0)                  # mg/kg/min (by design/tuning)
     # Saturating & capped sinks from E2
     E2sq = x[15] * x[15]
-    alpha = params.alpha_QE            # 1/min, tune smaller (see below)
+    alpha = params.alpha_QE            # mg/(kg*min^3)
 
     # Michaelis-Menten style saturation
     Km_ex = 120.0                      # mg/kg, tune 80–200
-    Vmax_ex = alpha * E2sq             # 1/min effective
+    Vmax_ex = alpha * E2sq             # mg/kg/min
     sink_p = Vmax_ex * x[3] / (Km_ex + x[3])   # mg/kg/min (plasma)
     sink_t = Vmax_ex * x[4] / (Km_ex + x[4])   # mg/kg/min (tissue)
 
@@ -259,8 +259,8 @@ def hybrid_t2d(
     # ------------------ Glucose kinetics (per-kg) -------------------
     k1 = params.k1; k2 = params.k2
     kp1 = params.kp1                          # mg/kg/min
-    # kp2 multiplies glucose *concentration* (mg/dL)
-    kp2 = params.kp2                          # (mg/kg/min) per (mg/dL)
+    # kp2 multiplies the glucose pool Gp (mg/kg) in T1D
+    kp2 = params.kp2                          # 1/min (unused in this T2D path)
     # kp3 multiplies insulin *concentration* (pmol/L)  (consistent with your CSV writeup)
     kp3 = params.kp3                          # (mg/kg/min) per (pmol/L)
 
@@ -280,17 +280,17 @@ def hybrid_t2d(
 
     # ------------------ T2D hybrid extras (units noted) -------------
     alpha_s = params.alpha_s                  # 1/min
-    beta_s  = params.beta_s                   # mU/(min·mM)
+    beta_s  = params.beta_s                   # mU/(min²·mM)
     gamma   = params.gamma                    # 1/min
-    K_deriv = params.K_deriv                  # mU/mM   (multiplied by dG/dt when dG/dt>0)
+    K_deriv = params.K_deriv                  # mU/(min*mM)   (multiplied by dG/dt when dG/dt>0)
     h_mM    = params.h                        # mM      (glucose secretion setpoint)
     Sb_per_kg = params.Sb_per_kg              # mU/(kg·min) basal secretion per kg
 
     # Insulin effect filters sensitivities expect I in mU/L
     k_a1 = params.k_a1; k_a2 = params.k_a2; k_a3 = params.k_a3  # 1/min
-    S_I1 = params.S_I1                      # L/mU
-    S_I2 = params.S_I2                      # L/mU
-    S_I3 = params.S_I3                      # L/mU
+    S_I1 = params.S_I1                      # L/(mU*min)
+    S_I2 = params.S_I2                      # L/(mU*min)
+    S_I3 = params.S_I3                      # L/(mU*min)
 
     # Glucose model T2D base (mmol/min), will convert to mg/kg/min
     EGP_0_mmol_min = params.EGP_0           # mmol/min
@@ -314,7 +314,7 @@ def hybrid_t2d(
     Il           = x[9]                      # pmol/kg
     Isc1, Isc2   = x[10], x[11]              # pmol/kg
     Gsc          = x[12]                     # mg/kg
-    E1, T_E, E2  = x[13], x[14], x[15]       # -, min, -
+    E1, T_E, E2  = x[13], x[14], x[15]       # bpm, min, min
     Y_mU_min     = x[16]                     # mU/min
     Gf_mM        = x[17]                     # mM
 
@@ -339,6 +339,7 @@ def hybrid_t2d(
     dGf_mM = (G_mM - Gf_mM) / tau_dG
     dGdt_mM = dGf_mM
 
+    # Y is a secretion rate (mU/min); P, D and dY are mU/min^2.
     P = beta_s * jnp.maximum(G_mM - h_mM, 0.0)
     D = K_deriv * jnp.maximum(dGdt_mM, 0.0)
     dY = -alpha_s * Y_mU_min + P + D
@@ -377,7 +378,7 @@ def hybrid_t2d(
     z = (E1 / jnp.maximum(denom, 1e-6)) ** n_pow
     f_E1 = z / (1.0 + z)
     dTE = (c1 * f_E1 + c2 - T_E) / tau_ex
-    T_E_safe = jnp.clip(T_E, 0.5, 60.0)
+    T_E_safe = jnp.maximum(T_E, 1e-3)
     dE2 = -((f_E1 / tau_in) + (1.0 / T_E_safe)) * E2 + (f_E1 * T_E_safe) / (c1 + c2)
 
     # Exercise shunts (mg/kg/min), simple proportional forms
@@ -385,9 +386,9 @@ def hybrid_t2d(
 
     # Saturate the E2-driven shunts and cap their per-minute fraction
     E2sq   = jnp.maximum(E2, 0.0) ** 2
-    alpha  = alpha_QE                     # same units (1/min)
+    alpha  = alpha_QE                     # mg/(kg*min^3)
     Km_ex  = 120.0                        # mg/kg (tune 80–200 if desired)
-    Vmax_p = alpha * E2sq                 # 1/min, effective "max" rate vs E2
+    Vmax_p = alpha * E2sq                 # mg/kg/min
     Vmax_t = Vmax_p
 
     sink_p = Vmax_p * Gp / (Km_ex + Gp)   # mg/kg/min, saturating with Gp
@@ -436,7 +437,7 @@ def hybrid_t2d(
     dIp = -(m2 + m4) * Ip + m1 * Il + ka1 * Isc1 + ka2 * Isc2
     dIp = _nn(Ip, dIp)
 
-    # Effects x1..x3 driven by I in mU/L via S_Ii (L/mU)
+    # Effects x1..x3 driven by I in mU/L via S_Ii (L/(mU*min))
     # (A.13–A.15 style)
     d_x1 = -k_a1 * x1 + S_I1 * (I_p_mU_L)
     d_x2 = -k_a2 * x2 + S_I2 * (I_p_mU_L)
@@ -482,6 +483,21 @@ def hybrid_t2d(
     return dx
 
 
+def _exercise_e2_step(x, dt, params):
+    """Exponential E2 substep with E1/T_E frozen at the start of the step.
+
+    E2 has units min; a is 1/min and b is min/min. This stabilizes the fast
+    decay at resting T_E=c2 without changing the vector field. Coupling to
+    E1/T_E is first order, so the complete method is not fourth-order RK4.
+    """
+    z = (x[13] / jnp.maximum(params.alpha_HR * params.HR0, 1e-6)) ** params.n_power
+    f = z / (1.0 + z)
+    time_scale = jnp.maximum(x[14], 1e-3)
+    a = f / params.tau_in + 1.0 / time_scale
+    b = f * time_scale / (params.c1 + params.c2)
+    return x[15] * jnp.exp(-a * dt) + (b / a) * (-jnp.expm1(-a * dt))
+
+
 @jit
 def t1d_rk4_step(
     x: jnp.ndarray,
@@ -508,31 +524,23 @@ def t1d_rk4_step(
     circ = factors["circadian"]  # JAX scalar
 
     # 3) RK4 on the original static params
+    # E2 can decay on a 0.01-minute scale. Use its stable affine solution
+    # at every RK stage, not just at the endpoint (which leaves stiff stages).
+    e2_half = _exercise_e2_step(x, dt / 2.0, params)
+    e2_end = _exercise_e2_step(x, dt, params)
     k1 = hovorka_t1d(x, action_jit, params, last_Qsto, last_foodtaken)
-    k2 = hovorka_t1d(x + (dt / 2.0) * k1, action_jit, params, last_Qsto, last_foodtaken)
-    k3 = hovorka_t1d(x + (dt / 2.0) * k2, action_jit, params, last_Qsto, last_foodtaken)
-    k4 = hovorka_t1d(x + dt * k3,         action_jit, params, last_Qsto, last_foodtaken)
+    stage2 = (x + (dt / 2.0) * k1).at[15].set(e2_half)
+    k2 = hovorka_t1d(stage2, action_jit, params, last_Qsto, last_foodtaken)
+    stage3 = (x + (dt / 2.0) * k2).at[15].set(e2_half)
+    k3 = hovorka_t1d(stage3, action_jit, params, last_Qsto, last_foodtaken)
+    stage4 = (x + dt * k3).at[15].set(e2_end)
+    k4 = hovorka_t1d(stage4, action_jit, params, last_Qsto, last_foodtaken)
     x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
-    # 4) Exact/semi-implicit E2 update
-    E1, T_E, E2 = x[13], x[14], x[15]
-    HR0, alpha_HR, n_power = params.HR0, params.alpha_HR, params.n_power
-    tau_in, c1, c2 = params.tau_in, params.c1, params.c2
-    denom = jnp.maximum(alpha_HR * HR0, 1e-3)
-    z = (E1 / denom) ** n_power
-    f_E1 = z / (1.0 + z)
-    T_E_safe = jnp.clip(T_E, 1.0, 60.0)
-    sum_c = jnp.maximum(c1 + c2, 1e-3)
-    a = (f_E1 / jnp.maximum(tau_in, 1e-6)) + (1.0 / T_E_safe)
-    b = (f_E1 * T_E_safe) / sum_c
-    exp_term = jnp.exp(-a * dt)
-    E2_next = jnp.maximum(E2 * exp_term + jnp.where(a > 0.0, (b / a) * (1.0 - exp_term), b * dt), 0.0)
-    x_next = x_next.at[15].set(E2_next)
+    x_next = x_next.at[15].set(e2_end)
 
     # clamps / projections
     POS = jnp.array([0,1,2, 3,4, 5,9, 10,11, 12])
     x_next = x_next.at[POS].set(jnp.maximum(x_next[POS], 0.0))
-    x_next = x_next.at[14].set(jnp.clip(x_next[14], 0.5, 60.0))
 
     # 5) Circadian delta for T1D: modulate kp1 as additive ΔEGP on Gp (exact for constant term over dt)
     delta_egp = (circ - 1.0) * params.kp1  # mg/kg/min
@@ -571,14 +579,21 @@ def t2d_rk4_step(
     circ = factors["circadian"]
 
     # 3) RK4 on static params
+    # E2 can decay on a 0.01-minute scale. Use its stable affine solution
+    # at every RK stage, not just at the endpoint (which leaves stiff stages).
+    e2_half = _exercise_e2_step(x, dt / 2.0, params)
+    e2_end = _exercise_e2_step(x, dt, params)
     k1 = hybrid_t2d(x, action_jit, params, last_Qsto, last_foodtaken)
-    k2 = hybrid_t2d(x + (dt / 2.0) * k1, action_jit, params, last_Qsto, last_foodtaken)
-    k3 = hybrid_t2d(x + (dt / 2.0) * k2, action_jit, params, last_Qsto, last_foodtaken)
-    k4 = hybrid_t2d(x + dt * k3,         action_jit, params, last_Qsto, last_foodtaken)
+    stage2 = (x + (dt / 2.0) * k1).at[15].set(e2_half)
+    k2 = hybrid_t2d(stage2, action_jit, params, last_Qsto, last_foodtaken)
+    stage3 = (x + (dt / 2.0) * k2).at[15].set(e2_half)
+    k3 = hybrid_t2d(stage3, action_jit, params, last_Qsto, last_foodtaken)
+    stage4 = (x + dt * k3).at[15].set(e2_end)
+    k4 = hybrid_t2d(stage4, action_jit, params, last_Qsto, last_foodtaken)
     x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    x_next = x_next.at[15].set(e2_end)
 
     # clamps / projections similar to your t2d_rk4_step
-    x_next = x_next.at[14].set(jnp.clip(x_next[14], 0.5, 60.0))
     POS = jnp.array([0,1,2, 3,4, 5,9, 10,11, 12, 16])
     x_next = x_next.at[POS].set(jnp.maximum(x_next[POS], 0.0))
 

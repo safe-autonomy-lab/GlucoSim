@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 from ..core.params import PatientParams, _mgdl_to_mM
-from ..physiology.steady_state_solvers import insulin_steady_state_from_Sb, iir_exogenous_pmolkgmin
+from ..physiology.steady_state_solvers import insulin_steady_state_from_Sb, iir_exogenous_pmolkgmin, tissue_glucose_steady_state
 
 
 def build_x0_with_Y_Gf(params: PatientParams) -> jnp.ndarray:
@@ -26,7 +26,7 @@ def build_x0_with_Y_Gf(params: PatientParams) -> jnp.ndarray:
     # Exercise placeholders
     E10 = 0.0
     E20 = 0.0
-    TE0 = params.tau_ex
+    TE0 = params.c2
 
     # SC insulin compartments
     Isc10 = 0.0
@@ -80,12 +80,12 @@ def init_state_t1d(params: PatientParams) -> jnp.ndarray:
     """
     Build the 18-state T1D vector at fasting steady state using Hovorka/UVA algebra.
 
-    Validated against the published T1D simulator by solving the linear steady-state equations
+    Uses the implemented linear steady-state equations
     for plasma/liver insulin, SC compartments, and keeping exercise buffers at rest.
     Returns x0 (18,) in CSV units:
       D1,D2,D3 [mg]; Gp,Gt [mg/kg]; Ip,Il,Isc1,Isc2 [pmol/kg];
       x1 [pmol/L offset], x2 [pmol/L], x3 [pmol/L];
-      Gsc [mg/kg]; E1[-],T_E[min],E2[-]; Y,Gf [mU/min, mM].
+      Gsc [mg/kg]; E1[bpm],T_E[min],E2[min]; Y,Gf [mU/min, mM].
     """
 
     # --- Glucose basal masses (mg/kg) ---    
@@ -111,14 +111,14 @@ def init_state_t1d(params: PatientParams) -> jnp.ndarray:
     I_p_mU_L = (Ip0 / params.Vi) / 6.0
 
     # --- Insulin “effect” states follow insulin concentration (pmol/L) ---
-    x1_0 = 0.0                 # pmol/L offset from Ib (zero effect at basal)
+    x1_0 = Ip0 / params.Vi - params.Ib  # actual basal offset from CSV insulin
     x2_0 = Ip0 / params.Vi     # pmol/L
     x3_0 = x2_0                # pmol/L
 
     # --- Gut & CGM & Exercise ---
     D1=D2=D3=0.0
     Gsc0 = Gp0
-    E1_0, T_E0, E2_0 = 0.0, 1.0, 0.0
+    E1_0, T_E0, E2_0 = 0.0, params.c2, 0.0
 
     x0 = jnp.array([D1, D2, D3, Gp0, Gt0,
                     Ip0, x1_0, x2_0, x3_0, Il0,
@@ -131,7 +131,7 @@ def init_state_t2d(params: PatientParams) -> jnp.ndarray:
     """
     Construct the T2D hybrid fasting state, reusing diabetic-specific helpers for Y/Gf and basal insulin.
 
-    Validity: reproduces the fasting solution of the UVA T2D hybrid when dynamic secretion is enabled.
+    Constructs a fasting state for this repository's hybrid equations.
     """
     x0 = build_x0_with_Y_Gf(params)
 
@@ -156,4 +156,13 @@ def init_state_t2d(params: PatientParams) -> jnp.ndarray:
         if abs(res1) > 1e-4 or abs(res2) > 1e-4:
             print(f"[init_state_t2d] Warning: insulin steady-state residual {res1:.3e}, {res2:.3e}")
 
+    # Synchronize all dependent states with the final pump + secretion balance.
+    I_pmolL = float(x0[5]) / params.Vi
+    for index, sensitivity, rate in (
+        (6, params.S_I1, params.k_a1),
+        (7, params.S_I2, params.k_a2),
+        (8, params.S_I3, params.k_a3),
+    ):
+        x0 = x0.at[index].set(sensitivity / rate * I_pmolL / 6.0 if rate > 0 else 0.0)
+    x0 = x0.at[4].set(tissue_glucose_steady_state(params, float(x0[3]), I_pmolL))
     return x0

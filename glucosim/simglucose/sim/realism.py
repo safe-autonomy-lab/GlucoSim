@@ -111,13 +111,14 @@ def _ou_exchange_eps(key: jnp.ndarray, dt: jnp.ndarray,
                      theta: float, sigma_dL: float,
                      Vg: float, ou_state_dL: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     """
-    OU on mg/dL; return (eps_mgkg, new_ou_state_dL, new_key).
+    Stationary OU offset in mg/dL; exchange only its change between steps.
+    Return (eps_mgkg, new_ou_state_dL, new_key).
     """
     key, (k,) = _splitn(key, 1)
     e = jnp.exp(-theta * dt)
     sd = jnp.sqrt((sigma_dL ** 2) * (1.0 - e * e))
     new_state_dL = e * ou_state_dL + sd * random.normal(k, shape=())
-    eps_mgkg = new_state_dL * Vg
+    eps_mgkg = (new_state_dL - ou_state_dL) * Vg
     return eps_mgkg, new_state_dL, key
 
 def add_process_noise_structured(x_next: jnp.ndarray,

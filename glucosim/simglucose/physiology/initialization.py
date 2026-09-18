@@ -20,8 +20,10 @@ def tune_initial_state(env_params: EnvParams) -> Tuple[EnvParams, jnp.ndarray]:
     if diabetes_type == PatientType.t1d:
         x0 = init_state_t1d(patient_params)
         kp1_new = tune_kp1_to_EGPb(patient_params, x0)
+        # Utilization must balance the production parameter we will actually use.
+        patient_params = dataclasses.replace(patient_params, kp1=kp1_new)
         Vm0_new = tune_Vm0_to_basal(patient_params, x0)
-        patient_params = dataclasses.replace(patient_params, Vm0=Vm0_new, kp1=kp1_new)
+        patient_params = dataclasses.replace(patient_params, Vm0=Vm0_new)
     elif diabetes_type in [PatientType.t2d, PatientType.t2d_no_pump]:
         # Align the T2D fasting setpoint with the CSV basal glucose by retuning
         # the base EGP term before the burn-in. The 72h warmup otherwise drifts

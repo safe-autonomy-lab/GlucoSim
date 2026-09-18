@@ -181,7 +181,7 @@ class JaxSimEnv(gym.Env):
         self._log_file_initialized = os.path.isfile(self.log_file) if self.log_file is not None else False
 
     def get_patient_params(self):
-        return self.patient_params
+        return self.env_params.patient_params
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -206,16 +206,18 @@ class JaxSimEnv(gym.Env):
 
         # Tune the initial state (calculates steady state based on patient params)
         self.env_params, tuned_state = tune_initial_state(self.env_params)
+        self.patient_params = self.env_params.patient_params
 
         # Call the JAX-native reset function (with warmup caching)
-        # Since tuning the initial state is time-consuming, we cache the warmup state
-        # We assume that patients' parameters are fixed for the entire episode and noise configuration is fixed
+        # Warmup is stochastic: reuse it only for the same configuration and
+        # actual reset key, including when reset(seed=None) advances the key.
         cache_key = (
             self.env_params.patient_params,
             self.env_params.sample_time,
             self.env_params.simulation_minutes,
             self.env_params.dia_steps,
             self.env_params.noise_config,
+            tuple(int(value) for value in np.asarray(jax.random.key_data(reset_key)).ravel()),
         )
         warm_state = self._get_warm_state(cache_key)
         if warm_state is None:
@@ -227,7 +229,6 @@ class JaxSimEnv(gym.Env):
             initial_state, initial_obs = reset(self.env_params, tuned_state, reset_key, warm_state=warm_state)
         
         self.scenario_meals = initial_state.get('scenario_meals', [])
-        self.patient_params = self.get_patient_params()
         # If we want to print the scenario meals, uncomment the following line
         # self._print_scenario_meals(self.scenario_meals)
         

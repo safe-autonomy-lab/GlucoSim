@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "legacy_commit": "a5bd537",
+  "purpose": "Exact legacy and post-fix characterization; organizational extraction must preserve record digests on the same runtime.",
+  "patients": {"cohorts": ["adolescent", "adult", "child"], "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]},
+  "types": ["t1d", "t2d", "t2d_no_pump"],
+  "seeds": [0, 42, 123],
+  "noise_modes": ["ode_noise_off", "default", "ou"],
+  "ode": {
+    "dt_min": 1.0,
+    "horizon_min": 360,
+    "cases": {
+      "fasting": {},
+      "meal": {"meal_g": 60.0, "meal_start_min": 30, "meal_duration_min": 15},
+      "bolus": {"bolus_u": 2.0, "bolus_start_min": 30, "bolus_duration_min": 1},
+      "meal_bolus": {"meal_g": 60.0, "meal_start_min": 30, "meal_duration_min": 15, "bolus_u": 4.0, "bolus_start_min": 30, "bolus_duration_min": 1},
+      "exercise": {"hr_reserve": 0.5, "exercise_start_min": 60, "exercise_duration_min": 30}
+    }
+  },
+  "gym": {
+    "patient_numbers": [1],
+    "sample_time_min": [1, 5],
+    "simulation_minutes": 1440,
+    "steps": 12,
+    "actions": [[0, 0], [0, 2], [1, 0]],
+    "action_rule": "Repeat the listed discrete action cycle for 12 steps, stopping on termination/truncation.",
+    "cache_histories": ["cold", "repeat_same_seed", "after_other_seed"],
+    "other_seed": 999,
+    "warmup_minutes": 4320,
+    "note": "ode_noise_off only disables NoiseConfig; controller acceptance/action randomness remains unchanged. Exercise is absent from the public Gym action space."
+  },
+  "smoke": {"patient_numbers": [1], "seeds": [42], "noise_modes": ["default"], "ode_cases": ["meal_bolus", "exercise"], "sample_time_min": [5]},
+  "acceptance": {
+    "extraction": "All record SHA256 digests, structure, dtype, numerical bytes, PRNG keys, discrete events and public outputs equal; pinned runtime metadata equal.",
+    "cache_fix": "Cold and repeat_same_seed runtime/trajectory records equal legacy; after_other_seed may change and must equal the post-fix cold record. Separate regression tests verify real cache hits and seed=None progression.",
+    "getter_fix": "Only exposed parameter records may differ; compare their digests against separately captured effective parameters for every repaired Gym record. Runtime trajectory records remain subject to cache rules.",
+    "compilation_changes": "Numerical kernels and JIT boundaries unchanged; harness compilation caches are released between capture groups. No numerical tolerance substitution.",
+    "platform": "CPU; record Python, JAX, jaxlib, NumPy, platform and x64 settings; refuse cross-runtime comparison."
+  }
+}

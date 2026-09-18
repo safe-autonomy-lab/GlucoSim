@@ -359,7 +359,8 @@ def create_patient_params(patient_name: str,
     Args:
         patient_name: Name of the patient (e.g., 'adolescent#001', 'adult#005')
         csv_path: Path to CSV file. If None, uses default path
-        diabetes_type: Type of diabetes adaptation ("t1d", "t2d", "t2d_no_pump")
+        diabetes_type: Type of diabetes adaptation ("t1d", "t2d", "t2d_no_pump").
+            Omitted or None selects "t1d".
         **override_params: Additional parameters to override defaults
         
     Returns:
@@ -369,7 +370,7 @@ def create_patient_params(patient_name: str,
         ValueError: If patient not found in CSV or invalid parameters
         
     Examples:
-        # Standard patient (default behavior)
+        # Standard T1D patient (default behavior)
         params = create_patient_params("adult#005")
         
         # T1D patient
@@ -381,6 +382,14 @@ def create_patient_params(patient_name: str,
         # T2D patient without pump
         params = create_patient_params("adult#007", diabetes_type="t2d_no_pump")
     """
+    # Resolve the documented default and reject unsupported types before CSV I/O.
+    if diabetes_type is None:
+        diabetes_type = "t1d"
+    if not isinstance(diabetes_type, str) or diabetes_type not in ("t1d", "t2d", "t2d_no_pump"):
+        raise ValueError(
+            f"Invalid diabetes_type: {diabetes_type!r}. Must be 't1d', 't2d', or 't2d_no_pump'"
+        )
+
     # Extract calibration-only options that are not PatientParams fields
     autobalance_enabled = override_params.pop("autobalance_enabled", True)
     autobalance_basal_scale = override_params.pop("autobalance_basal_scale", 1.0)
@@ -961,7 +970,8 @@ def create_env_params(patient_name: str = "adolescent#001",
     Args:
         patient_name: Name of patient from CSV (e.g., 'adolescent#001', 'adult#005')
         csv_path: Path to patient parameters CSV file
-        diabetes_type: Type of diabetes adaptation ("t1d", "t2d", "t2d_no_pump")
+        diabetes_type: Type of diabetes adaptation ("t1d", "t2d", "t2d_no_pump").
+            Omitted or None selects "t1d".
         simulation_minutes: Length of simulation in minutes
         sample_time: Sampling time in minutes
         **patient_overrides: Additional patient parameter overrides

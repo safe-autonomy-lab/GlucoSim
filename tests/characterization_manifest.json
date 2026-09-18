@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "legacy_commit": "a5bd537",
   "purpose": "Exact legacy and post-fix characterization; organizational extraction must preserve record digests on the same runtime.",
   "patients": {"cohorts": ["adolescent", "adult", "child"], "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]},
@@ -28,6 +28,109 @@
     "other_seed": 999,
     "warmup_minutes": 4320,
     "note": "ode_noise_off only disables NoiseConfig; controller acceptance/action randomness remains unchanged. Exercise is absent from the public Gym action space."
+  },
+  "nondefault": {
+    "patient": "adolescent#001",
+    "csv_changes": {
+      "BW": 73.25,
+      "Vm0": 0.6
+    },
+    "factory_cases": {
+      "default": {},
+      "carb_scale": {
+        "kwargs": {
+          "carb_absorption_scale": 1.4
+        }
+      },
+      "insulin_scale": {
+        "kwargs": {
+          "insulin_sensitivity_scale": 0.8
+        }
+      },
+      "eat_scale": {
+        "kwargs": {
+          "eat_rate_scale": 1.2
+        }
+      },
+      "autobalance_basal": {
+        "types": [
+          "t1d"
+        ],
+        "kwargs": {
+          "autobalance_enabled": true,
+          "autobalance_basal_scale": 0.8
+        }
+      },
+      "autobalance_hepatic": {
+        "types": [
+          "t1d"
+        ],
+        "kwargs": {
+          "autobalance_enabled": true,
+          "autobalance_hepatic_scale": 1.2
+        }
+      },
+      "autobalance_disabled": {
+        "types": [
+          "t1d"
+        ],
+        "kwargs": {
+          "autobalance_enabled": false
+        }
+      },
+      "final_override": {
+        "kwargs": {
+          "carb_absorption_scale": 1.4,
+          "kabs": 0.071,
+          "basal": 0.35
+        }
+      },
+      "acceptance": {
+        "acceptance": 0.4,
+        "kwargs": {
+          "bolus_acceptance_prob": 0.8
+        }
+      },
+      "alternative_csv": {
+        "alternative_csv": true
+      },
+      "combined_scales": {
+        "kwargs": {
+          "carb_absorption_scale": 1.4,
+          "insulin_sensitivity_scale": 0.8,
+          "eat_rate_scale": 1.2
+        }
+      },
+      "t2d_autobalance_disabled": {
+        "types": [
+          "t2d",
+          "t2d_no_pump"
+        ],
+        "kwargs": {
+          "autobalance_enabled": false
+        }
+      },
+      "t2d_autobalance_scales": {
+        "types": [
+          "t2d",
+          "t2d_no_pump"
+        ],
+        "kwargs": {
+          "autobalance_basal_scale": 0.8,
+          "autobalance_hepatic_scale": 1.2
+        }
+      }
+    },
+    "adapter_configs": {
+      "empty": {},
+      "custom": {
+        "Ib_factor": 1.1,
+        "Ipb_factor": 1.2,
+        "HEb_factor": 0.9,
+        "BW_factor": 1.05
+      }
+    },
+    "note": "All cases run in smoke and full captures. Autobalance options are applicable to T1D only; preserve existing T2D semantics. Alternative CSV is generated in a temporary directory from bundled bytes."
   },
   "smoke": {"patient_numbers": [1], "seeds": [42], "noise_modes": ["default"], "ode_cases": ["meal_bolus", "exercise"], "sample_time_min": [5]},
   "acceptance": {

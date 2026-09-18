@@ -4,6 +4,11 @@
     python examples/characterize_simulator.py --output /tmp/postfix.json --compare /tmp/legacy.json --allow-reset-fixes
 
 Default is the full manifest; --smoke selects its explicitly defined subset.
+Both modes include the nondefault factory/adapter cases. Captures record the
+bundled and generated CSV hashes. For strict refactors, use --verify-source REV
+and --verify-reference-source REV to bind each side to its intended Git source.
+Version 3 captures require a fresh baseline; older CSV provenance cannot be
+reconstructed retrospectively. Keep the same harness on both sides.
 Output paths must not exist. Digests cover full arrays, keys and public outputs,
 not just plasma glucose. This is characterization, not clinical validation.
 Capture releases JAX compilation caches between groups to bound memory; run
@@ -11,9 +16,11 @@ legacy and repaired captures sequentially. New reset keys require independent
 72-hour stochastic warmups; repeated identical keys can reuse cached states.
 """
 import argparse
+import csv
 import dataclasses
 import gc
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -22,6 +29,7 @@ import resource
 from functools import lru_cache
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('JAX_PLATFORMS', 'cpu')
@@ -33,6 +41,7 @@ import numpy as np
 
 import glucosim
 from glucosim import gym_env as gym
+from glucosim.simglucose.core import params as patient_factory
 from glucosim.simglucose.core.params import create_env_params
 from glucosim.simglucose.core.types import PatientType
 from glucosim.simglucose.physiology.initialization import tune_initial_state
@@ -40,6 +49,64 @@ from glucosim.simglucose.physiology.glucose_dynamics import t1d_rk4_step, t2d_rk
 from glucosim.simglucose.sim.reset import WARMUP_MINUTES
 
 MANIFEST = Path(__file__).resolve().parents[1] / 'tests' / 'characterization_manifest.json'
+PATIENT_CSV = 'glucosim/simglucose/params/vpatient_params.csv'
+
+
+def patient_inputs(manifest):
+    """Hash the exact bundled and generated CSV bytes used by this harness."""
+    bundled = (MANIFEST.parent.parent / PATIENT_CSV).read_bytes()
+    reader = csv.DictReader(io.StringIO(bundled.decode()))
+    rows = list(reader)
+    matches = [row for row in rows if row['Name'] == manifest['nondefault']['patient']]
+    if len(matches) != 1:
+        raise ValueError('Alternative CSV requires exactly one matching patient')
+    for field, value in manifest['nondefault']['csv_changes'].items():
+        if field not in reader.fieldnames:
+            raise ValueError(f'Unknown CSV field: {field}')
+        matches[0][field] = str(value)
+    stream = io.StringIO(newline='')
+    writer = csv.DictWriter(stream, fieldnames=reader.fieldnames, lineterminator='\n')
+    writer.writeheader()
+    writer.writerows(rows)
+    return {PATIENT_CSV: bundled, 'generated/alternative_patient.csv': stream.getvalue().encode()}
+
+
+def input_hashes(manifest):
+    return {name: hashlib.sha256(data).hexdigest() for name, data in patient_inputs(manifest).items()}
+
+
+def capture_nondefault(manifest):
+    """Exercise public factory forwarding and later tuning, plus adapter configs."""
+    spec = manifest['nondefault']
+    records = {}
+    acceptance = patient_factory.ACCEPTANCE_PROB_DEFAULT
+    try:
+        with tempfile.TemporaryDirectory(prefix='glucosim-characterization-') as directory:
+            alternative = Path(directory) / 'patients.csv'
+            alternative.write_bytes(patient_inputs(manifest)['generated/alternative_patient.csv'])
+            for kind in manifest['types']:
+                for name, case in spec['factory_cases'].items():
+                    if kind not in case.get('types', manifest['types']):
+                        continue
+                    patient_factory.ACCEPTANCE_PROB_DEFAULT = case.get('acceptance', acceptance)
+                    kwargs = dict(case.get('kwargs', {}))
+                    if case.get('alternative_csv'):
+                        kwargs['csv_path'] = str(alternative)
+                    prefix = f'nondefault/{spec["patient"]}/{kind}/factory/{name}'
+                    patient = patient_factory.create_patient_params(spec['patient'], diabetes_type=kind, **kwargs)
+                    env = create_env_params(spec['patient'], diabetes_type=kind, **kwargs)
+                    records[prefix + '/patient'] = digest(patient)
+                    records[prefix + '/created'] = digest(env)
+                    records[prefix + '/tuned'] = digest(tune_initial_state(env))
+                patient_factory.ACCEPTANCE_PROB_DEFAULT = acceptance
+                if kind != 't1d':
+                    base = patient_factory.create_patient_params(spec['patient'], diabetes_type='t1d')
+                    adapt = getattr(patient_factory, f'adapt_params_for_{kind}')
+                    for name, config in spec['adapter_configs'].items():
+                        records[f'nondefault/{spec["patient"]}/{kind}/adapter/{name}'] = digest(adapt(base, config=dict(config)))
+    finally:
+        patient_factory.ACCEPTANCE_PROB_DEFAULT = acceptance
+    return records
 
 
 def digest(tree):
@@ -91,7 +158,7 @@ def action_trace(case, horizon):
 def capture(manifest, smoke=False):
     if manifest['ode']['dt_min'] != 1.0 or manifest['gym']['warmup_minutes'] != WARMUP_MINUTES:
         raise ValueError('Manifest timestep/warmup does not match the characterization implementation')
-    records = {}
+    records = capture_nondefault(manifest)
     subset = manifest['smoke'] if smoke else {}
     numbers = subset.get('patient_numbers', manifest['patients']['numbers'])
     seeds = subset.get('seeds', manifest['seeds'])
@@ -173,14 +240,27 @@ def legacy_source(revision):
     return commit, hashes
 
 
+def verify_source(capture, revision):
+    """Bind each artifact independently; refactors intentionally change sources."""
+    commit, hashes = legacy_source(revision)
+    if capture['source_hashes'] != hashes:
+        raise ValueError(f'Capture source hashes do not match {commit}')
+    bundled = subprocess.check_output(['git', 'show', f'{commit}:{PATIENT_CSV}'], cwd=MANIFEST.parent.parent)
+    if capture['input_hashes'][PATIENT_CSV] != hashlib.sha256(bundled).hexdigest():
+        raise ValueError(f'Capture CSV does not match {commit}')
+
+
 def compare(reference, current, allow_reset_fixes=False):
-    for field in ('runtime', 'manifest', 'smoke', 'harness_sha256'):
+    for field in ('runtime', 'manifest', 'smoke', 'harness_sha256', 'input_hashes'):
+        if field not in reference or field not in current:
+            raise ValueError(f'Missing {field}; recapture with the current harness')
         if reference[field] != current[field]:
             raise ValueError(f'Cannot compare different {field}')
     if allow_reset_fixes:
         commit, hashes = legacy_source(reference['manifest']['legacy_commit'])
         if reference['source_commit'] != commit or reference['source_hashes'] != hashes:
             raise ValueError('Legacy reference does not match the declared baseline source')
+        verify_source(reference, commit)
     old, new = reference['records'], current['records']
     if old.keys() != new.keys():
         raise AssertionError('Characterization record keys changed')
@@ -213,9 +293,13 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--compare', type=Path)
     parser.add_argument('--allow-reset-fixes', action='store_true')
+    parser.add_argument('--verify-source', help='Require current source/CSV hashes to match this Git revision')
+    parser.add_argument('--verify-reference-source', help='Require compared artifact source/CSV hashes to match this Git revision')
     args = parser.parse_args()
     if args.allow_reset_fixes and not args.compare:
         parser.error('--allow-reset-fixes requires --compare')
+    if args.verify_reference_source and not args.compare:
+        parser.error('--verify-reference-source requires --compare')
     if args.output.exists():
         parser.error('Output exists; choose a new path')
     if jax.default_backend() != 'cpu':
@@ -229,12 +313,20 @@ def main():
                   source_hashes={str(path.relative_to(MANIFEST.parent.parent)): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in sorted((MANIFEST.parent.parent / 'glucosim').rglob('*.py'))},
                   harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                  records=capture(manifest, args.smoke))
+                  input_hashes=input_hashes(manifest))
+    if args.verify_source:
+        verify_source(output, args.verify_source)
+    reference = json.loads(args.compare.read_text()) if args.compare else None
+    if args.verify_reference_source:
+        verify_source(reference, args.verify_reference_source)
+    output['records'] = capture(manifest, args.smoke)
+    if output['input_hashes'] != input_hashes(manifest):
+        raise ValueError('Patient CSV changed during capture')
     output['capture_resources'] = {'peak_rss_kib': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
     with args.output.open('x') as file:
         json.dump(output, file, indent=2)
     if args.compare:
-        changed = compare(json.loads(args.compare.read_text()), output, args.allow_reset_fixes)
+        changed = compare(reference, output, args.allow_reset_fixes)
         print('Comparison passed; intentional changed records:', len(changed))
     print('Saved', len(output['records']), 'records to', args.output)
 

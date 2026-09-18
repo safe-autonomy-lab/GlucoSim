@@ -1,5 +1,6 @@
 """The characterization gate must reject changes outside the reset repair."""
 from copy import deepcopy
+import hashlib
 
 import pytest
 
@@ -11,6 +12,7 @@ def baseline_source(monkeypatch):
     # Unit tests exercise validation without requiring historical Git objects.
     monkeypatch.setattr('examples.characterize_simulator.legacy_source',
                         lambda revision: ('baseline-commit', {'glucosim/example.py': 'baseline-hash'}))
+    monkeypatch.setattr('examples.characterize_simulator.subprocess.check_output', lambda *args, **kwargs: b'csv')
 
 
 def captures():
@@ -20,7 +22,8 @@ def captures():
             records[f'patient/gym/5/default/42/{history}/{field}'] = 'cold'
     commit, hashes = 'baseline-commit', {'glucosim/example.py': 'baseline-hash'}
     current = dict(runtime={}, manifest={'legacy_commit': 'a5bd537'}, smoke=True, records=records,
-                   harness_sha256='same-harness', source_commit=commit, source_hashes=hashes)
+                   harness_sha256='same-harness', source_commit=commit, source_hashes=hashes,
+                   input_hashes={'glucosim/simglucose/params/vpatient_params.csv': hashlib.sha256(b'csv').hexdigest()})
     reference = deepcopy(current)
     for key in records:
         if key.endswith('/exposed') or ('/after_other_seed/' in key and not key.endswith('/effective')):
@@ -82,5 +85,43 @@ def test_effective_parameters_cannot_use_mixed_seed_exception():
     reference, current = captures()
     for field in ('effective', 'exposed'):
         current['records'][f'patient/gym/5/default/42/after_other_seed/{field}'] = 'wrong'
+    with pytest.raises(AssertionError, match='Unexpected changes'):
+        compare(reference, current, allow_reset_fixes=True)
+
+
+def test_changed_or_missing_csv_provenance_fails():
+    _, current = captures()
+    reference = deepcopy(current)
+    reference['input_hashes'] = {}
+    with pytest.raises(ValueError, match='input_hashes'):
+        compare(reference, current)
+    del reference['input_hashes']
+    with pytest.raises(ValueError, match='recapture'):
+        compare(reference, current)
+
+
+def test_common_csv_drift_fails_git_verification():
+    reference, current = captures()
+    for artifact in (reference, current):
+        artifact['input_hashes']['glucosim/simglucose/params/vpatient_params.csv'] = 'shared-drift'
+    with pytest.raises(ValueError, match='CSV'):
+        compare(reference, current, allow_reset_fixes=True)
+
+
+def test_source_verification_uses_content_not_capture_head():
+    from examples.characterize_simulator import verify_source
+    _, current = captures()
+    current['source_commit'] = 'head-before-final-commit'
+    verify_source(current, 'final-commit')
+    current['source_hashes'] = {}
+    with pytest.raises(ValueError, match='source hashes'):
+        verify_source(current, 'final-commit')
+
+
+def test_nondefault_records_have_no_repair_exception():
+    reference, current = captures()
+    key = 'nondefault/adolescent#001/t1d/factory/carb_scale/tuned'
+    reference['records'][key] = 'before'
+    current['records'][key] = 'after'
     with pytest.raises(AssertionError, match='Unexpected changes'):
         compare(reference, current, allow_reset_fixes=True)

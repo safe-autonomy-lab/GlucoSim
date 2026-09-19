@@ -162,6 +162,11 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
         patient_params = dataclasses.replace(patient_params, **override_params)
         logger.info(f"Applied {len(override_params)} parameter overrides: {list(override_params.keys())}")
 
+    # Check the resolved pair, including simultaneous overrides and presets.
+    # Otherwise physiology gates basal off while delivery history records it.
+    if not patient_params.use_pump and patient_params.basal != 0:
+        raise ValueError("use_pump=False requires basal=0")
+
     # Reject invalid exercise time scales before tracing the ODE with JAX.
     for name in ("tau_HR", "tau_ex", "tau_in", "c2", "HR0", "alpha_HR", "n_power"):
         value = getattr(patient_params, name)

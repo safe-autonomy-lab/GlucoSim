@@ -15,11 +15,21 @@ def manifest():
 
 
 @pytest.fixture(scope='module')
-def records(manifest):
-    return harness.capture_nondefault(manifest)
+def constructible_manifest(manifest):
+    # The frozen historical manifest deliberately retains its now-invalid
+    # no-pump + basal=.35 case. Test that rejection separately below.
+    subset = deepcopy(manifest)
+    subset['nondefault']['factory_cases']['final_override']['types'] = ['t1d', 't2d']
+    return subset
 
 
-def test_matrix_keys_and_distinguishable_factory_cases(manifest, records):
+@pytest.fixture(scope='module')
+def records(constructible_manifest):
+    return harness.capture_nondefault(constructible_manifest)
+
+
+def test_matrix_keys_and_distinguishable_factory_cases(constructible_manifest, records):
+    manifest = constructible_manifest
     expected = set()
     for kind in manifest['types']:
         prefix = f'nondefault/adolescent#001/{kind}/factory/'
@@ -39,6 +49,16 @@ def test_matrix_keys_and_distinguishable_factory_cases(manifest, records):
             expected.update(adapter + name for name in manifest['nondefault']['adapter_configs'])
             assert records[adapter + 'empty'] != records[adapter + 'custom']
     assert set(records) == expected
+
+
+def test_historical_no_pump_basal_case_is_explicitly_rejected(manifest):
+    subset = deepcopy(manifest)
+    subset['types'] = ['t2d_no_pump']
+    subset['nondefault']['factory_cases'] = {
+        'final_override': subset['nondefault']['factory_cases']['final_override']}
+    assert subset['nondefault']['factory_cases']['final_override']['kwargs']['basal'] == 0.35
+    with pytest.raises(ValueError, match='use_pump=False requires basal=0'):
+        harness.capture_nondefault(subset)
 
 
 @pytest.mark.parametrize('case,argument', [

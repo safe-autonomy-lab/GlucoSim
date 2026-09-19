@@ -364,7 +364,12 @@ def create_patient_params(patient_name: str,
             effective physiology before conversion/calibration. T1D resistance
             must be 1; T2D resistance must be finite and positive. T1D kp1/Vm0
             and T2D h/F_cns0/Sb_per_kg/S_I1/S_I2/S_I3/EGP_0 are owned outputs
-            and cannot be overridden here. Other fields retain late replacement.
+            and cannot be overridden here. k1/k2/Km0/ke1/ke2 also resolve before
+            calibration for all types; Gtb/kp2/kp3 do so only for T1D;
+            HEb/m1/m2/m30/m4/k_a3 do so for both T2D variants, and Ib only for
+            pump T2D. Their existing units and numerical handling are unchanged.
+            Other fields retain late replacement, including T2D Gtb and
+            no-pump Ib. The resolved use_pump=False requires basal=0.
             autobalance_enabled controls only T1D factory calibration; reset
             initialization still tunes its type-specific outputs.
         

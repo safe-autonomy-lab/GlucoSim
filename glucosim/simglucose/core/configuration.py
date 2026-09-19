@@ -88,4 +88,19 @@ def extract_effective_inputs(diabetes_type: str, overrides: dict) -> dict:
         # than every numbers.Real implementation (for example Fraction).
         effective[name] = normalized
         overrides.pop(name)
+
+    # Stage selection is type-specific. Keep these coefficients' existing
+    # numeric handling; conversion/calibration owns their formulas and guards.
+    calibration_inputs = ('k1', 'k2', 'Km0', 'ke1', 'ke2')
+    if diabetes_type == 't1d':
+        calibration_inputs += ('Gtb', 'kp2', 'kp3')
+    else:
+        calibration_inputs += ('HEb', 'm1', 'm2', 'm30', 'm4', 'k_a3')
+        if diabetes_type == 't2d':
+            calibration_inputs += ('Ib',)
+        # No-pump has no controlled Ib target. T2D Gtb remains a late input
+        # pending a contract for its calibration-seed versus initial-pool role.
+    for name in calibration_inputs:
+        if name in overrides:
+            effective[name] = overrides.pop(name)
     return effective

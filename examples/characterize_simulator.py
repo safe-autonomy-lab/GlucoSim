@@ -30,9 +30,11 @@ from functools import lru_cache
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('JAX_PLATFORMS', 'cpu')
+from examples import characterization_shards as sharding
 
 import jax
 import jax.numpy as jnp
@@ -155,10 +157,13 @@ def action_trace(case, horizon):
     return jnp.asarray(actions)
 
 
-def capture(manifest, smoke=False):
+def capture(manifest, smoke=False, jobs=None):
     if manifest['ode']['dt_min'] != 1.0 or manifest['gym']['warmup_minutes'] != WARMUP_MINUTES:
         raise ValueError('Manifest timestep/warmup does not match the characterization implementation')
-    records = capture_nondefault(manifest)
+    selected = set(sharding.job_records(manifest, smoke) if jobs is None else jobs)
+    if not selected <= sharding.job_records(manifest, smoke).keys():
+        raise ValueError('Unknown capture jobs')
+    records = capture_nondefault(manifest) if 'nondefault' in selected else {}
     subset = manifest['smoke'] if smoke else {}
     numbers = subset.get('patient_numbers', manifest['patients']['numbers'])
     seeds = subset.get('seeds', manifest['seeds'])
@@ -168,6 +173,8 @@ def capture(manifest, smoke=False):
         for number in numbers:
             patient = f'{cohort}#{number:03d}'
             for kind in manifest['types']:
+                if f'ode/{kind}' not in selected:
+                    continue
                 prefix = f'{patient}/{kind}'
                 env = create_env_params(patient_name=patient, diabetes_type=kind)
                 records[prefix + '/created'] = digest(env)
@@ -187,6 +194,8 @@ def capture(manifest, smoke=False):
         for number in spec['patient_numbers']:
             patient = f'{cohort}#{number:03d}'
             for kind in manifest['types']:
+                if f'gym/{patient}/{kind}' not in selected:
+                    continue
                 for sample in subset.get('sample_time_min', spec['sample_time_min']):
                     for mode in modes:
                         instance = gym.make(f'{kind}-v0', patient_name=patient, sample_time=sample,
@@ -254,8 +263,12 @@ def compare(reference, current, allow_reset_fixes=False):
     for field in ('runtime', 'manifest', 'smoke', 'harness_sha256', 'input_hashes'):
         if field not in reference or field not in current:
             raise ValueError(f'Missing {field}; recapture with the current harness')
-        if reference[field] != current[field]:
+        if sharding.exact_json(reference[field]) != sharding.exact_json(current[field]):
             raise ValueError(f'Cannot compare different {field}')
+    for field in ('harness_files', 'execution_settings'):
+        if field in reference or field in current:
+            if sharding.exact_json(reference.get(field)) != sharding.exact_json(current.get(field)):
+                raise ValueError(f'Cannot compare different {field}')
     if allow_reset_fixes:
         commit, hashes = legacy_source(reference['manifest']['legacy_commit'])
         if reference['source_commit'] != commit or reference['source_hashes'] != hashes:
@@ -291,11 +304,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--shard-index', type=int)
+    parser.add_argument('--shard-count', type=int)
     parser.add_argument('--compare', type=Path)
     parser.add_argument('--allow-reset-fixes', action='store_true')
     parser.add_argument('--verify-source', help='Require current source/CSV hashes to match this Git revision')
     parser.add_argument('--verify-reference-source', help='Require compared artifact source/CSV hashes to match this Git revision')
     args = parser.parse_args()
+    if (args.shard_index is None) != (args.shard_count is None):
+        parser.error('--shard-index and --shard-count are required together')
+    if args.shard_index is not None and args.compare:
+        parser.error('Compare only complete merged captures')
     if args.allow_reset_fixes and not args.compare:
         parser.error('--allow-reset-fixes requires --compare')
     if args.verify_reference_source and not args.compare:
@@ -308,21 +327,38 @@ def main():
     runtime = dict(python=platform.python_version(), platform=platform.platform(), jax=jax.__version__,
                    jaxlib=jaxlib.__version__, numpy=np.__version__, backend=jax.default_backend(),
                    x64=bool(jax.config.x64_enabled))
+    files = sharding.harness_files()
+    settings = sharding.execution_settings()
+    started = time.monotonic()
+    jobs = None if args.shard_index is None else sharding.membership(manifest, args.smoke, args.shard_index, args.shard_count)
     output = dict(manifest=manifest, runtime=runtime, smoke=args.smoke,
                   source_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=MANIFEST.parent).decode().strip(),
                   source_hashes={str(path.relative_to(MANIFEST.parent.parent)): hashlib.sha256(path.read_bytes()).hexdigest()
                                  for path in sorted((MANIFEST.parent.parent / 'glucosim').rglob('*.py'))},
-                  harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                  harness_sha256=sharding.harness_digest(files), harness_files=files, execution_settings=settings,
                   input_hashes=input_hashes(manifest))
     if args.verify_source:
         verify_source(output, args.verify_source)
     reference = json.loads(args.compare.read_text()) if args.compare else None
     if args.verify_reference_source:
         verify_source(reference, args.verify_reference_source)
-    output['records'] = capture(manifest, args.smoke)
+    output['records'] = capture(manifest, args.smoke, jobs)
+    coverage = sharding.job_records(manifest, args.smoke)
+    sharding.validate_records(output['records'], [key for job in (coverage if jobs is None else jobs) for key in coverage[job]])
+    if sharding.harness_files() != files or sharding.execution_settings() != settings:
+        raise ValueError('Harness or execution settings changed during capture')
+    source_now = {str(path.relative_to(MANIFEST.parent.parent)): hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in sorted((MANIFEST.parent.parent / 'glucosim').rglob('*.py'))}
+    if output['source_hashes'] != source_now:
+        raise ValueError('Source changed during capture')
+    if jobs is not None:
+        output['shard'] = dict(schema=sharding.SCHEMA, index=args.shard_index, count=args.shard_count, jobs=jobs, status='complete')
     if output['input_hashes'] != input_hashes(manifest):
         raise ValueError('Patient CSV changed during capture')
-    output['capture_resources'] = {'peak_rss_kib': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+    output['capture_resources'] = {'peak_rss_kib': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                                   'elapsed_seconds': time.monotonic() - started,
+                                   'hostname': platform.node(),
+                                   'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None}
     with args.output.open('x') as file:
         json.dump(output, file, indent=2)
     if args.compare:

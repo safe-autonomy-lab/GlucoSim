@@ -52,13 +52,14 @@ def t1d_overrides(base_params: PatientParams, acceptance_probability: float) -> 
     }
 
 
-def t2d_overrides(basal_rate: float, acceptance_probability: float) -> dict:
+def t2d_overrides(basal_rate: float, acceptance_probability: float, *,
+                  resistance_factor: float = T2D_INSULIN_RESISTANCE) -> dict:
     return {
         # Residual beta-cell function (25-30% remaining)
         'beta_cell_function': 0.25,
 
         # Moderate insulin resistance
-        'insulin_resistance_factor': T2D_INSULIN_RESISTANCE,
+        'insulin_resistance_factor': resistance_factor,
 
         # Use pump for better glucose control
         'use_pump': True,
@@ -82,18 +83,19 @@ def t2d_overrides(basal_rate: float, acceptance_probability: float) -> dict:
     }
 
 
-def t2d_no_pump_overrides(base_params: PatientParams, acceptance_probability: float) -> dict:
+def t2d_no_pump_overrides(base_params: PatientParams, acceptance_probability: float, *,
+                          resistance_factor: float = T2D_NO_PUMP_INSULIN_RESISTANCE) -> dict:
     return {
         # No insulin pump
         'use_pump': False,
         'beta_cell_function': 0.3,
 
         # Legacy no-pump resistance setting; differs from the pump preset.
-        'insulin_resistance_factor': T2D_NO_PUMP_INSULIN_RESISTANCE,
+        'insulin_resistance_factor': resistance_factor,
         # Recompute from the original gains, not the already-scaled pump gains.
-        'S_I1': base_params.S_I1 / T2D_NO_PUMP_INSULIN_RESISTANCE,
-        'S_I2': base_params.S_I2 / T2D_NO_PUMP_INSULIN_RESISTANCE,
-        'S_I3': base_params.S_I3 / T2D_NO_PUMP_INSULIN_RESISTANCE,
+        'S_I1': base_params.S_I1 / resistance_factor,
+        'S_I2': base_params.S_I2 / resistance_factor,
+        'S_I3': base_params.S_I3 / resistance_factor,
 
         # For now, full acceptance to simplify learning
         'bolus_acceptance_prob': acceptance_probability,

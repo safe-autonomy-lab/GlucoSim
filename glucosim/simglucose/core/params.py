@@ -359,7 +359,14 @@ def create_patient_params(patient_name: str,
         csv_path: Path to CSV file. If None, uses default path
         diabetes_type: Type of diabetes adaptation ("t1d", "t2d", "t2d_no_pump").
             Omitted or None selects "t1d".
-        **override_params: Additional parameters to override defaults
+        **override_params: BW (final kg), Vg (dL/kg), Vi (L/kg), Gpb (mg/kg),
+            Fsnc and EGPb (mg/kg/min), and insulin_resistance_factor describe
+            effective physiology before conversion/calibration. T1D resistance
+            must be 1; T2D resistance must be finite and positive. T1D kp1/Vm0
+            and T2D h/F_cns0/Sb_per_kg/S_I1/S_I2/S_I3/EGP_0 are owned outputs
+            and cannot be overridden here. Other fields retain late replacement.
+            autobalance_enabled controls only T1D factory calibration; reset
+            initialization still tunes its type-specific outputs.
         
     Returns:
         PatientParams instance configured for the specified patient

@@ -4,10 +4,13 @@ These options preserve historical meanings, including ignored T2D autobalance
 options and post-calibration stress scales. They are not part of the JAX tree.
 Acceptance must be supplied at call time by the compatibility entry point.
 T2D factors belong to the adaptation boundary; late patient overrides belong
-to the factory. Neither mapping is stored in the options object. Values are
-not coerced or newly validated here; legacy consumption rules still apply.
+to the factory. Neither mapping is stored in the options object. Values
+in BuildOptions are not coerced or newly validated. The separate effective-input
+extractor validates only the explicitly covered physiological factory inputs.
 """
 from dataclasses import dataclass
+import math
+from numbers import Real
 
 
 @dataclass(frozen=True)
@@ -43,3 +46,46 @@ def extract_construction_options(acceptance_probability: float,
         if name in overrides:
             values[name] = overrides.pop(name)
     return BuildOptions(acceptance_probability, **values)
+
+
+def extract_effective_inputs(diabetes_type: str, overrides: dict) -> dict:
+    """Consume covered effective inputs; leave unlisted late overrides alone.
+
+    BW [kg], Vg [dL/kg], Vi [L/kg] and resistance must be positive.
+    Gpb [mg/kg], Fsnc and EGPb [mg/kg/min] may be zero. These values
+    describe the effective patient, after preset input factors. Output overrides
+    that conversion or initialization owns are rejected before CSV loading.
+    """
+    if diabetes_type == 't1d':
+        forbidden = ('kp1', 'Vm0')
+    else:
+        forbidden = ('h', 'F_cns0', 'Sb_per_kg', 'S_I1', 'S_I2', 'S_I3', 'EGP_0')
+    for name in forbidden:
+        if name in overrides:
+            owner = 'initialization' if name in ('kp1', 'Vm0', 'EGP_0') else 'conversion'
+            raise ValueError(f"Cannot override {name} for {diabetes_type}: {owner}-owned output")
+
+    effective = {}
+    for name in ('BW', 'Vg', 'Vi', 'Gpb', 'Fsnc', 'EGPb', 'insulin_resistance_factor'):
+        if name not in overrides:
+            continue
+        value = overrides[name]
+        positive = name in ('BW', 'Vg', 'Vi', 'insulin_resistance_factor')
+        try:
+            real_scalar = isinstance(value, Real) and not isinstance(value, bool)
+            normalized = float(value) if real_scalar else float('nan')
+            valid = (math.isfinite(normalized)
+                     and (value > 0 if positive else value >= 0)
+                     and (normalized > 0 if positive else normalized >= 0))
+        except (OverflowError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            bound = 'positive' if positive else 'nonnegative'
+            raise ValueError(f"{name} must be a finite {bound} real scalar (not bool)")
+        if name == 'insulin_resistance_factor' and diabetes_type == 't1d' and value != 1:
+            raise ValueError("insulin_resistance_factor must be 1 for t1d; its equations do not implement resistance scaling")
+        # Downstream NumPy/JAX arithmetic requires a supported scalar, rather
+        # than every numbers.Real implementation (for example Fraction).
+        effective[name] = normalized
+        overrides.pop(name)
+    return effective

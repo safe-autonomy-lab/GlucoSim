@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from . import patient_loader, conversion
 from . import presets
-from .configuration import BuildOptions, extract_construction_options
+from .configuration import BuildOptions, extract_construction_options, extract_effective_inputs
 from .params import PatientParams, EnvParams, NoiseConfig
 from .types import PatientType
 from ..physiology import calibration, kernels
@@ -29,8 +29,9 @@ def _build_patient_from_overrides(patient_name, csv_path, diabetes_type,
                                   acceptance_probability, override_params):
     """Existing factory normalization shared by patient and environment entry points.
 
-    Keep the option representation and late-override contract unchanged. The
-    compatibility facade supplies its live acceptance default at each call.
+    The compatibility facade supplies its live acceptance default at each call.
+    Covered effective inputs are separated before loading; other overrides
+    retain their final replacement stage.
     """
     override_params = override_params.copy()
     # Resolve the documented default and reject unsupported types before CSV I/O.
@@ -48,6 +49,9 @@ def _build_patient_from_overrides(patient_name, csv_path, diabetes_type,
 def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_type: str,
                          options: BuildOptions, override_params: dict) -> PatientParams:
     """Build from CSV; caller has resolved type and separated construction options."""
+
+    override_params = override_params.copy()
+    effective_overrides = extract_effective_inputs(diabetes_type, override_params)
 
     # Default CSV path if not provided
     if csv_path is None:
@@ -145,15 +149,15 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
     # Convert base parameters to PatientParams for proper T2D adaptation
     temp_params = PatientParams(**base_params)
     if diabetes_type == "t1d":
-        patient_params = build_t1d(temp_params, options)
+        patient_params = build_t1d(temp_params, options, effective_overrides=effective_overrides)
     elif diabetes_type == "t2d":
-        patient_params = build_t2d(temp_params, None, options)
+        patient_params = build_t2d(temp_params, None, options, effective_overrides=effective_overrides)
     elif diabetes_type == "t2d_no_pump":
-        patient_params = build_t2d_no_pump(temp_params, None, options)
+        patient_params = build_t2d_no_pump(temp_params, None, options, effective_overrides=effective_overrides)
     else:
         raise ValueError(f"Invalid diabetes_type: {diabetes_type}. Must be 't1d', 't2d', or 't2d_no_pump'")
 
-    # Apply overrides at the very end to ensure they take precedence
+    # Only unlisted/behavioral overrides remain; apply them once at the end.
     if override_params:
         patient_params = dataclasses.replace(patient_params, **override_params)
         logger.info(f"Applied {len(override_params)} parameter overrides: {list(override_params.keys())}")
@@ -171,7 +175,8 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
     return patient_params
 
 
-def build_t1d(base_params: PatientParams, options: BuildOptions) -> PatientParams:
+def build_t1d(base_params: PatientParams, options: BuildOptions, *,
+              effective_overrides: Optional[dict] = None) -> PatientParams:
     """Adapt the exact supplied object, without loading or rebuilding its source."""
     autobalance_enabled = options.autobalance_enabled
     autobalance_basal_scale = options.autobalance_basal_scale
@@ -181,6 +186,8 @@ def build_t1d(base_params: PatientParams, options: BuildOptions) -> PatientParam
     eat_rate_scale = options.eat_rate_scale
 
     params = base_params
+    if effective_overrides:
+        params = dataclasses.replace(params, **effective_overrides)
 
     logger.info("Adapting parameters for Type 1 Diabetes")
 
@@ -220,7 +227,8 @@ def build_t1d(base_params: PatientParams, options: BuildOptions) -> PatientParam
 
 
 def build_t2d(base_params: PatientParams, config: Optional[dict],
-              options: BuildOptions) -> PatientParams:
+              options: BuildOptions, *,
+              effective_overrides: Optional[dict] = None) -> PatientParams:
     """Preserve the legacy recipe starting from the exact supplied parameters."""
     carb_absorption_scale = options.carb_absorption_scale
     insulin_sensitivity_scale = options.insulin_sensitivity_scale
@@ -246,21 +254,34 @@ def build_t2d(base_params: PatientParams, config: Optional[dict],
         # Select resistance before converting the unscaled insulin-effect gains.
         insulin_resistance_factor=presets.T2D_INSULIN_RESISTANCE,
     )
+    # Factory inputs name the effective patient, not the pre-factor source.
+    # The original source gains have not been divided at this point.
+    if effective_overrides:
+        temp_params = dataclasses.replace(temp_params, **effective_overrides)
 
     # Convert to T2D format using comprehensive conversion logic
-    t2d_params = conversion.patient_to_t2d_params(temp_params, use_dynamic_HE=False)
+    t2d_params = conversion.patient_to_t2d_params(
+        temp_params, use_dynamic_HE=False,
+        effective_resistance=(effective_overrides or {}).get('insulin_resistance_factor'),
+    )
     basal_rate = calibration.pump_basal_rate_t2d(t2d_params)
 
     # Apply T2D-specific behavioral and physiological parameters
     t2d_params = dataclasses.replace(
-        t2d_params, **presets.t2d_overrides(basal_rate, options.acceptance_probability)
+        t2d_params, **presets.t2d_overrides(
+            basal_rate, options.acceptance_probability,
+            resistance_factor=t2d_params.insulin_resistance_factor,
+        )
     )
 
     t2d_params = calibration.calibrate_t2d_pump(t2d_params)
 
     # Safety validation for T2D
     assert 0.2 <= t2d_params.beta_cell_function <= 0.3, f"Invalid T2D beta-cell function: {t2d_params.beta_cell_function}"
-    assert 2.0 <= t2d_params.insulin_resistance_factor <= 3.0, f"Invalid T2D insulin resistance: {t2d_params.insulin_resistance_factor}"
+    if effective_overrides and 'insulin_resistance_factor' in effective_overrides:
+        assert np.isfinite(t2d_params.insulin_resistance_factor) and t2d_params.insulin_resistance_factor > 0
+    else:
+        assert 2.0 <= t2d_params.insulin_resistance_factor <= 3.0, f"Invalid T2D insulin resistance: {t2d_params.insulin_resistance_factor}"
     assert t2d_params.BW > 0, f"Invalid body weight after T2D adjustment: {t2d_params.BW}"
 
     logger.debug(f"T2D adaptations: beta_cell={t2d_params.beta_cell_function:.2f}, "
@@ -288,7 +309,8 @@ def build_t2d(base_params: PatientParams, config: Optional[dict],
 
 
 def build_t2d_no_pump(base_params: PatientParams, config: Optional[dict],
-                      options: BuildOptions) -> PatientParams:
+                      options: BuildOptions, *,
+                      effective_overrides: Optional[dict] = None) -> PatientParams:
     """Preserve the legacy recipe starting from the exact supplied parameters."""
     carb_absorption_scale = options.carb_absorption_scale
     insulin_sensitivity_scale = options.insulin_sensitivity_scale
@@ -300,20 +322,29 @@ def build_t2d_no_pump(base_params: PatientParams, config: Optional[dict],
         config,
         dataclasses.replace(options, carb_absorption_scale=1.0,
                             insulin_sensitivity_scale=1.0, eat_rate_scale=1.0),
+        effective_overrides=effective_overrides,
     )
 
     logger.info("Adapting parameters for Type 2 Diabetes (no pump)")
 
     # No-pump specific adjustments
+    resistance = (effective_overrides or {}).get(
+        'insulin_resistance_factor', presets.T2D_NO_PUMP_INSULIN_RESISTANCE
+    )
     params = dataclasses.replace(
-        params, **presets.t2d_no_pump_overrides(base_params, options.acceptance_probability)
+        params, **presets.t2d_no_pump_overrides(
+            base_params, options.acceptance_probability, resistance_factor=resistance
+        )
     )
 
     params = calibration.calibrate_t2d_no_pump(params)
 
     # Safety validation for T2D no-pump
     assert not params.use_pump, "SAFETY: T2D no-pump must not use pump"
-    assert params.insulin_resistance_factor >= 2.5, f"T2D no-pump IR factor too low: {params.insulin_resistance_factor}"
+    if effective_overrides and 'insulin_resistance_factor' in effective_overrides:
+        assert np.isfinite(params.insulin_resistance_factor) and params.insulin_resistance_factor > 0
+    else:
+        assert params.insulin_resistance_factor >= 2.5, f"T2D no-pump IR factor too low: {params.insulin_resistance_factor}"
     assert params.max_bolus_U <= 25.0, f"Unsafe max bolus for T2D no-pump: {params.max_bolus_U}"
 
     logger.debug(f"T2D no-pump adaptations: IR_factor={params.insulin_resistance_factor:.1f}, "

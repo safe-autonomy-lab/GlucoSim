@@ -56,7 +56,8 @@ def _units_ok(value: float) -> bool:
     return np.isfinite(value) and value >= 0.0
 
 
-def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = False) -> PatientParams:
+def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = False, *,
+                         effective_resistance: float | None = None) -> PatientParams:
     """
     Derive the additional fields the hybrid T2D ODE expects without mutating the CSV
     contract (glucose in mg/kg, insulin in pmol/kg, volumes in dL/kg or L/kg).
@@ -116,7 +117,11 @@ def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = Fal
     Sb_per_kg = (S_sys_target_U_per_hr * 1000 / 60) / ((1 - HEb) * BW)
 
     # Insulin sensitivity terms can be scaled by the IR factor without breaking dimensionality.
-    ir_factor = max(float(base_params.insulin_resistance_factor), 1e-6)
+    # Preserve the legacy floor for direct conversions. Factory-supplied
+    # resistance has already been validated as finite and positive, and its
+    # requested value (including values below that floor) is authoritative.
+    ir_factor = (max(float(base_params.insulin_resistance_factor), 1e-6)
+                 if effective_resistance is None else effective_resistance)
     S_I1 = base_params.S_I1 / ir_factor
     S_I2 = base_params.S_I2 / ir_factor
     S_I3 = base_params.S_I3 / ir_factor

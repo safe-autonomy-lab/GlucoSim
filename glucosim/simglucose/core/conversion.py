@@ -33,12 +33,12 @@ def _mmolmin_from_mgkgmin(val_mgkgmin: float, BW: float) -> float:
 
 def _as_liters_from_Vg(Vg_raw: float, BW: float) -> float:
     """Convert glucose distribution volume to liters."""
-    return float(Vg_raw * BW / 10.0)
+    return Vg_raw * BW / 10.0
 
 
 def _as_liters_from_Vi(Vi_raw: float, BW: float) -> float:
     """Convert insulin distribution volume to liters."""
-    return float(Vi_raw * BW)
+    return Vi_raw * BW
 
 
 def _mu_per_l(Ib_raw: float) -> float:
@@ -72,11 +72,8 @@ def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = Fal
     """
     BW = float(base_params.BW)
     Vg_dL_per_kg = float(base_params.Vg)
-    Vi_L_per_kg = float(base_params.Vi)
-
-    # These conversions only create model-side conveniences; base CSV entries stay mg/kg & pmol/kg.
-    V_G = _as_liters_from_Vg(Vg_dL_per_kg, BW)   # L
-    V_I = _as_liters_from_Vi(Vi_L_per_kg, BW)    # L
+    # Preserve host conversion's scalar normalization; properties remain traceable.
+    V_I_L = _as_liters_from_Vi(float(base_params.Vi), BW)
 
     # Basal glucose concentration in mg/dL is still (mg/kg)/(dL/kg); convert to mM for hybrid secretion.
     Gpb_mg_per_kg = float(base_params.Gpb)
@@ -105,7 +102,7 @@ def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = Fal
 
     # Map basal insulin from pmol/L-equivalent (CSV) into mU/L for secretion bookkeeping.
     Ib_mU_L = _mu_per_l(float(base_params.Ib))
-    I_p_b = Ib_mU_L * V_I
+    I_p_b = Ib_mU_L * V_I_L
     K_b = max(0.0, ((m3_b + m1) * (m2 + m4) / m1) - m2)
     S_t_b = max(0.0, K_b * I_p_b)
     # The result cannot be negative.
@@ -151,14 +148,12 @@ def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = Fal
         Sb_per_kg=Sb_per_kg,
         m5=m5,
         m6=m6,
-        V_I=V_I,
         k_a1=base_params.k_a1,
         k_a2=base_params.k_a2,
         k_a3=base_params.k_a3,
         S_I1=S_I1,
         S_I2=S_I2,
         S_I3=S_I3,
-        V_G=V_G,
         EGP_0=EGP_0,
         F_cns0=F_cns0,
         k12=k12,
@@ -179,7 +174,7 @@ def _assert_csv_contract_preserved(original: PatientParams, updated: PatientPara
     """
     base_fields = (
         'BW', 'EGPb', 'Gb', 'Ib', 'u2ss',
-        'Vg', 'Vi', 'V_G_L', 'V_I_L',
+        'Vg', 'Vi',
         'Ipb', 'Ilb', 'Gpb', 'Gtb',
         'Fsnc', 'ke1', 'ke2',
         'kp1', 'kp2', 'kp3',
@@ -202,8 +197,11 @@ def _assert_csv_contract_preserved(original: PatientParams, updated: PatientPara
 
 def _assert_t2d_units(params: PatientParams) -> None:
     """Run quick sanity checks on the hybrid T2D parameters."""
-    assert _units_ok(params.V_G), "Expected V_G in liters and non-negative."
-    assert _units_ok(params.V_I), "Expected V_I in liters and non-negative."
+    # This host-only boundary historically accepts float-convertible scalars.
+    glucose_L = _as_liters_from_Vg(float(params.Vg), float(params.BW))
+    insulin_L = _as_liters_from_Vi(float(params.Vi), float(params.BW))
+    assert _units_ok(glucose_L), "Expected V_G_L in liters and non-negative."
+    assert _units_ok(insulin_L), "Expected V_I_L in liters and non-negative."
     assert _units_ok(params.EGP_0), "EGP_0 must be finite mmol/min."
     assert _units_ok(params.F_cns0), "F_cns0 must be finite mmol/min."
     assert np.isfinite(params.h) and params.h >= 0.0, "Setpoint h must be in mM."

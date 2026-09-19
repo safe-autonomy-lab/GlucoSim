@@ -94,11 +94,9 @@ def test_direct_input_never_reloads_csv_or_mutates(monkeypatch, supplied, kind):
         assert first.basal == direct.BW * 0.011
     else:
         assert first.BW == direct.BW * config['BW_factor']
-        assert first.V_I == direct.Vi * first.BW
-        assert first.V_G == direct.Vg * first.BW / 10.0
+        assert first.V_I_L == direct.Vi * first.BW
+        assert first.V_G_L == direct.Vg * first.BW / 10.0
         assert first.S_I1 == direct.S_I1 / (2.5 if kind == 't2d' else 2.8)
-        # Preserve legacy original-volume aliases, even on a modified input.
-        assert first.V_G_L == direct.V_G_L and first.V_I_L == direct.V_I_L
 
 
 @pytest.mark.parametrize('kind', ['t2d', 't2d_no_pump'])

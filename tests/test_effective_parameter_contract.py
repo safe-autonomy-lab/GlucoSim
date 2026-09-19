@@ -64,11 +64,8 @@ def test_effective_weight_controls_weight_dependent_construction(synthetic_sourc
         # 1.8 mg/kg/min * 100 kg / 180 mg/mmol = 1 mmol/min.
         assert patient.F_cns0 == pytest.approx(1.0)
         assert patient.F_cns0 * 180.0 / patient.BW == pytest.approx(1.8)
-        assert patient.V_G == pytest.approx(20.0)
-        assert patient.V_I == pytest.approx(5.0)
-        # Synchronizing the original reporting aliases is deliberately deferred.
-        assert patient.V_G_L == pytest.approx(16.0)
-        assert patient.V_I_L == pytest.approx(4.0)
+        assert patient.V_G_L == pytest.approx(20.0)
+        assert patient.V_I_L == pytest.approx(5.0)
 
 
 @pytest.mark.parametrize('kind,resistance,weight,pump,beta', [
@@ -130,7 +127,7 @@ def test_all_covered_inputs_and_dependencies_survive_direct_initialization(
             assert p.Sb_per_kg * 100.0 * (1.0 - p.HEb) * 60.0 / 1000.0 == pytest.approx(0.4)
             assert (p.S_I1, p.S_I2, p.S_I3) == pytest.approx((0.0002, 0.002, 0.001))
         # Reset owns EGP_0, but does not retune these conversion/calibration values.
-        for name in ('Sb_per_kg', 'Vm0', 'Vmx', 'V_G', 'V_I'):
+        for name in ('Sb_per_kg', 'Vm0', 'Vmx', 'V_G_L', 'V_I_L'):
             assert getattr(tuned, name) == getattr(patient, name)
     else:
         # Reset owns kp1/Vm0 and restores the requested production target.
@@ -270,8 +267,8 @@ def test_changed_volume_and_cns_inputs_survive_conversion_and_initialization(
         assert candidate.Vi == 0.1
         assert candidate.Fsnc == 3.6
         assert candidate.h == pytest.approx(2.5)  # 180 / 4 / 18 mM.
-        assert candidate.V_I == pytest.approx(10.0)  # .1 L/kg * 100 kg.
-        assert candidate.V_I_L == pytest.approx(4.0)  # Deferred source alias.
+        assert candidate.V_I_L == pytest.approx(10.0)  # .1 L/kg * 100 kg.
+        assert candidate.V_G_L == pytest.approx(40.0)  # 4 dL/kg * 100 kg / 10.
         assert candidate.F_cns0 == pytest.approx(2.0)  # 3.6 * 100 / 180.
         assert candidate.F_cns0 * 180.0 / candidate.BW == pytest.approx(3.6)
 

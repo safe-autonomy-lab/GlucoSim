@@ -56,6 +56,9 @@ def extract_effective_inputs(diabetes_type: str, overrides: dict) -> dict:
     describe the effective patient, after preset input factors. Output overrides
     that conversion or initialization owns are rejected before CSV loading.
     """
+    for name in ('V_G', 'V_I', 'V_G_L', 'V_I_L'):
+        if name in overrides:
+            raise ValueError(f'Cannot override {name}: derived volume; set BW, Vg, or Vi instead')
     if diabetes_type == 't1d':
         forbidden = ('kp1', 'Vm0')
     else:

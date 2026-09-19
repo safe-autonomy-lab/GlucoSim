@@ -102,8 +102,6 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
         'meal_acceptance_prob': options.acceptance_probability,
         'bolus_acceptance_prob': options.acceptance_probability,
         'exercise_acceptance_prob': options.acceptance_probability,
-        'V_G_L': (base_params['Vg'] * base_params['BW']) / 10.0,  # dL/kg to L
-        'V_I_L': base_params['Vi'] * base_params['BW'],           #
 
         # Pump settings
         'use_pump': False,

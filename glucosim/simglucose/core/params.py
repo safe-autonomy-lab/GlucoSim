@@ -10,6 +10,7 @@ import jax
 from ..core.types import PatientType
 # Re-export the existing loader API for callers importing core.params.
 from .patient_loader import load_patient_parameters_from_csv
+from .conversion import _as_liters_from_Vg, _as_liters_from_Vi
 from ..physiology import calibration
 # Keep existing import paths available; construction uses the owners directly.
 from ..sim.scenario_gen import get_meal_profile_for_cohort
@@ -52,8 +53,6 @@ class PatientParams:
     u2ss: float  # pmol/kg/min (raw CSV basal infusion)
     Vg:   float  # dL/kg
     Vi:   float  # L/kg
-    V_G_L: float # L (absolute glucose distribution vol; may be derived)
-    V_I_L: float # L (absolute insulin distribution vol; may be derived)
     Ipb:  float  # pmol/kg
     Ilb:  float  # pmol/kg
     Gpb:  float  # mg/kg
@@ -137,7 +136,6 @@ class PatientParams:
     beta_s: float = 1.0                   # mU/(min²·mM); forcing gain, not steady secretion gain
     h: float = 6.0                        # mM
     Sb_per_kg: float = 0.02               # mU/(kg·min)
-    V_I: float = 0.05                     # L (will be scaled by BW externally if used)
     k_a1: float = 0.006                   # 1/min
     k_a2: float = 0.06                    # 1/min
     k_a3: float = 0.12                    # 1/min
@@ -148,11 +146,26 @@ class PatientParams:
     beta_ex: float = 0.2                 # mg/kg/min
     alpha_QE: float = 0.004                 # mg/(kg·min³), with E2 measured in minutes
     m6: float = 0.0                       # - (HE dynamics intercept if used)
-    V_G: float = 0.0                      # L (absolute glucose distribution vol)
     EGP_0: float = 0.0                    # mmol/min (base EGP if using x3-suppressed EGP path)
     F_cns0: float = 0.0                   # mmol/min (brain usage; preferred over Fsnc)
     k12: float = 0.0                      # 1/min (optional intercompartment)
     F01: float = 0.0                      # mmol/min (non–insulin-dependent uptake)
+
+    @property
+    def V_G_L(self):
+        """Total glucose distribution volume [L], derived from effective inputs."""
+        return _as_liters_from_Vg(self.Vg, self.BW)
+
+    @property
+    def V_I_L(self):
+        """Total insulin distribution volume [L], derived from effective inputs."""
+        return _as_liters_from_Vi(self.Vi, self.BW)
+
+    def __setstate__(self, state):
+        if any(name in state for name in ('V_G', 'V_I', 'V_G_L', 'V_I_L')):
+            raise ValueError('Obsolete PatientParams pickle contains stored derived volumes; '
+                             'reconstruct from authoritative BW, Vg, and Vi inputs')
+        self.__dict__.update(state)
 
     # -------------------- Units/Descriptions registry --------------------
     UNITS: ClassVar[Dict[str, Unit]] = {
@@ -180,9 +193,9 @@ class PatientParams:
         # T2D hybrid
         "A_G":"-","tau_D":"min","MwG_mg_per_mmol":"mg/mmol","tau_S":"min","gamma":"1/min",
         "K_deriv":"mU/(min·mM)","alpha_s":"1/min","beta_s":"mU/(min²·mM)","h":"mM",
-        "Sb_per_kg":"mU/(kg·min)","V_I":"L","k_a1":"1/min","k_a2":"1/min","k_a3":"1/min",
+        "Sb_per_kg":"mU/(kg·min)","k_a1":"1/min","k_a2":"1/min","k_a3":"1/min",
         "S_I1":"(1/min)/(mU/L)","S_I2":"(1/min)/(mU/L)","S_I3":"(1/min)/(mU/L)",
-        "beta_ex":"mg/kg/min","alpha_QE":"mg/(kg·min³)","m6":"-","V_G":"L","EGP_0":"mmol/min",
+        "beta_ex":"mg/kg/min","alpha_QE":"mg/(kg·min³)","m6":"-","EGP_0":"mmol/min",
         "F_cns0":"mmol/min","k12":"1/min","F01":"mmol/min",
         "patient_name":"-"
     }
@@ -194,6 +207,8 @@ class PatientParams:
         "Ib":"Basal plasma insulin concentration; Ib = Ip/Vi.",
         "Vg":"Glucose distribution volume per kg.",
         "Vi":"Insulin distribution volume per kg.",
+        "V_G_L":"Total glucose distribution volume: Vg * BW / 10 [L].",
+        "V_I_L":"Total insulin distribution volume: Vi * BW [L].",
         "Ipb":"Basal plasma insulin mass.",
         "Ilb":"Basal liver insulin mass.",
         "Gpb":"Basal plasma+tightly equilibrated glucose mass.",
@@ -226,8 +241,8 @@ class PatientParams:
                                   "beta_cell_function","insulin_resistance_factor","meal_safe_window",
                                   "bolus_safe_window","exercise_safe_window","max_bolus_U","max_meal_g","max_exercise_min","basal"]},
         **{k:"T2DHybrid" for k in ["A_G","tau_D","MwG_mg_per_mmol","tau_S","gamma","K_deriv","alpha_s",
-                                   "beta_s","h","Sb_per_kg","V_I","k_a1","k_a2","k_a3",
-                                   "S_I1","S_I2","S_I3","beta_ex","alpha_QE","m6","V_G",
+                                   "beta_s","h","Sb_per_kg","k_a1","k_a2","k_a3",
+                                   "S_I1","S_I2","S_I3","beta_ex","alpha_QE","m6",
                                    "EGP_0","F_cns0","k12","F01"]},
     }
 
@@ -237,6 +252,8 @@ class PatientParams:
             if f.name in ("UNITS","DESCRIPTIONS","CATEGORIES"):
                 continue
             yield f.name, getattr(self, f.name)
+        for name in ("V_G_L", "V_I_L"):
+            yield name, getattr(self, name)
 
     def to_table(self, markdown: bool = False, only_category: Optional[str] = None) -> str:
         rows = []
@@ -275,7 +292,7 @@ class PatientParams:
 
     def list_probably_unused(self) -> str:
         """Heuristic list of params not wired in the current hybrid T2D code path."""
-        unused = ["CL","Rdb","PCRb","Fsnc","m5","V_G_L","V_I_L"]  # update as wiring changes
+        unused = ["CL","Rdb","PCRb","Fsnc","m5"]  # update as wiring changes
         return ", ".join(p for p in unused if hasattr(self, p))
 
 # Convenience free functions
@@ -368,7 +385,8 @@ def create_patient_params(patient_name: str,
             calibration for all types; Gtb/kp2/kp3 do so only for T1D;
             HEb/m1/m2/m30/m4/k_a3 do so for both T2D variants, and Ib only for
             pump T2D. Their existing units and numerical handling are unchanged.
-            Other fields retain late replacement, including T2D Gtb and
+            V_G/V_I/V_G_L/V_I_L are derived volumes and cannot be overridden;
+            set BW, Vg, and Vi instead. Other fields retain late replacement, including T2D Gtb and
             no-pump Ib. The resolved use_pump=False requires basal=0.
             autobalance_enabled controls only T1D factory calibration; reset
             initialization still tunes its type-specific outputs.
@@ -527,7 +545,7 @@ def adapt_params_for_t2d_no_pump(
 # Preserve established helper imports; implementation ownership is conversion.
 from .conversion import (
     _mgdl_to_mM, _mM_to_mgdl, _mmolmin_from_mgkgmin,
-    _as_liters_from_Vg, _as_liters_from_Vi, _mu_per_l,
+    _mu_per_l,
     _almost_equal, _units_ok,
 )
 

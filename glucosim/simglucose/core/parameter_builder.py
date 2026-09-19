@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from . import patient_loader, conversion
 from . import presets
-from .configuration import LegacyBuildOptions
+from .configuration import LegacyBuildOptions, extract_construction_options
 from .params import PatientParams, EnvParams, NoiseConfig
 from .types import PatientType
 from ..physiology import calibration, kernels
@@ -41,23 +41,7 @@ def _build_patient_from_overrides(patient_name, csv_path, diabetes_type,
             f"Invalid diabetes_type: {diabetes_type!r}. Must be 't1d', 't2d', or 't2d_no_pump'"
         )
 
-    # Extract calibration-only options that are not PatientParams fields
-    autobalance_enabled = override_params.pop("autobalance_enabled", True)
-    autobalance_basal_scale = override_params.pop("autobalance_basal_scale", 1.0)
-    autobalance_hepatic_scale = override_params.pop("autobalance_hepatic_scale", 1.0)
-    carb_absorption_scale = override_params.pop("carb_absorption_scale", 1.0)
-    insulin_sensitivity_scale = override_params.pop("insulin_sensitivity_scale", 1.0)
-    eat_rate_scale = override_params.pop("eat_rate_scale", 1.0)
-
-    options = LegacyBuildOptions(
-        acceptance_probability=acceptance_probability,
-        autobalance_enabled=autobalance_enabled,
-        autobalance_basal_scale=autobalance_basal_scale,
-        autobalance_hepatic_scale=autobalance_hepatic_scale,
-        carb_absorption_scale=carb_absorption_scale,
-        insulin_sensitivity_scale=insulin_sensitivity_scale,
-        eat_rate_scale=eat_rate_scale,
-    )
+    options = extract_construction_options(acceptance_probability, override_params)
     return build_patient_params(patient_name, csv_path, diabetes_type, options, override_params)
 
 

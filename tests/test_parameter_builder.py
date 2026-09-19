@@ -8,7 +8,9 @@ import pytest
 from examples.characterize_simulator import digest
 from glucosim import gym_env as gym
 from glucosim.simglucose.core import params, patient_loader
-from glucosim.simglucose.core.configuration import LegacyBuildOptions
+from glucosim.simglucose.core.configuration import (
+    LegacyBuildOptions, extract_construction_options,
+)
 
 
 @pytest.fixture(scope='module')
@@ -22,6 +24,28 @@ def test_options_are_immutable_and_acceptance_is_explicit():
     options = LegacyBuildOptions(acceptance_probability=0.35)
     with pytest.raises(dataclasses.FrozenInstanceError):
         options.acceptance_probability = 1.0
+
+
+def test_factory_extraction_preserves_late_and_unrecognized_keywords():
+    late = dict(BW=79.0, bolus_acceptance_prob=0.6,
+                acceptance_probability=0.8, t2d_factors={}, unknown=None)
+    remaining = late.copy()
+    options = extract_construction_options(0.35, remaining)
+    assert options == LegacyBuildOptions(acceptance_probability=0.35)
+    assert remaining == late
+    assert list(remaining) == list(late)
+    assert remaining['t2d_factors'] is late['t2d_factors']
+
+
+def test_factory_extraction_does_not_coerce_explicit_values():
+    explicit = dict(autobalance_enabled=False, autobalance_basal_scale=None,
+                    autobalance_hepatic_scale=0.0, carb_absorption_scale='raw',
+                    insulin_sensitivity_scale=object(), eat_rate_scale=-1.0)
+    remaining = dict(explicit, BW=79.0)
+    options = extract_construction_options(0.35, remaining)
+    for name, value in explicit.items():
+        assert getattr(options, name) is value
+    assert remaining == {'BW': 79.0}
 
 
 @pytest.mark.parametrize('kind', ['t1d', 't2d', 't2d_no_pump'])

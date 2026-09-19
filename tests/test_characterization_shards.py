@@ -13,6 +13,21 @@ def manifest():
     return json.loads((shards.ROOT / 'tests/characterization_manifest.json').read_text())
 
 
+def synthetic_records(manifest, keys):
+    from examples.characterization_contract import expected_rejection, factory_record_stages, rejection_digest
+    records = {key: hashlib.sha256(key.encode()).hexdigest() for key in keys}
+    for kind in manifest['types']:
+        for name, case in manifest['nondefault']['factory_cases'].items():
+            spec = expected_rejection(case, kind)
+            if spec is None:
+                continue
+            for stage in factory_record_stages(case, kind):
+                key = f'nondefault/{manifest["nondefault"]["patient"]}/{kind}/factory/{name}/{stage}'
+                if key in records:
+                    records[key] = rejection_digest(stage, spec)
+    return records
+
+
 def make_shards(manifest, count=3, smoke=False):
     jobs = shards.job_records(manifest, smoke)
     files = shards.harness_files()
@@ -26,8 +41,7 @@ def make_shards(manifest, count=3, smoke=False):
         artifact = deepcopy(common)
         artifact['shard'] = dict(schema=shards.SCHEMA, status='complete', index=index,
                                  count=count, jobs=members)
-        artifact['records'] = {key: hashlib.sha256(key.encode()).hexdigest()
-                               for job in members for key in jobs[job]}
+        artifact['records'] = synthetic_records(manifest, [key for job in members for key in jobs[job]])
         output.append(artifact)
     return output
 
@@ -35,9 +49,9 @@ def make_shards(manifest, count=3, smoke=False):
 def test_full_manifest_has_exact_unique_coverage(manifest):
     jobs = shards.job_records(manifest)
     keys = [key for group in jobs.values() for key in group]
-    assert len(keys) == len(set(keys)) == 6271
+    assert len(keys) == len(set(keys)) == 6273
     assert len(jobs) == 13
-    assert len(jobs['nondefault']) == 97
+    assert len(jobs['nondefault']) == 99
 
 
 @pytest.mark.parametrize('smoke', [False, True])
@@ -85,8 +99,7 @@ def test_merge_is_exact_order_independent_and_preserves_inputs(manifest, smoke):
     artifacts = make_shards(manifest, smoke=smoke)
     before = deepcopy(artifacts)
     merged = shards.merge(list(reversed(artifacts)))
-    expected = {key: hashlib.sha256(key.encode()).hexdigest()
-                for keys in shards.job_records(manifest, smoke).values() for key in keys}
+    expected = synthetic_records(manifest, [key for keys in shards.job_records(manifest, smoke).values() for key in keys])
     assert merged['records'] == expected
     assert merged == shards.merge(artifacts)
     assert artifacts == before
@@ -252,6 +265,15 @@ def test_completion_receipts_require_exact_path_coverage(tmp_path, operation):
 def migration_captures(manifest, monkeypatch):
     from examples import characterize_simulator as harness
     current = shards.merge(make_shards(manifest))
+    # Preserve the original v3 serial-to-sharding migration fixture.
+    manifest = deepcopy(manifest)
+    manifest['version'] = 3
+    cases = manifest['nondefault']['factory_cases']
+    cases['final_override'].pop('expected_rejection')
+    cases.pop('final_override_no_pump_valid')
+    current['manifest'] = deepcopy(manifest)
+    current['records'] = synthetic_records(manifest,
+        [key for group in shards.job_records(manifest).values() for key in group])
     current['source_commit'] = shards.MIGRATION_COMMIT
     reference = deepcopy(current)
     del reference['merged_shards']
@@ -499,3 +521,30 @@ def test_migration_execution_receipt_preserves_value_types(migration_captures):
     assert current['execution_settings'] == receipt['execution_settings']
     with pytest.raises(ValueError, match='execution settings'):
         shards.verify_serial_migration(reference, current, receipt)
+
+
+@pytest.mark.parametrize('smoke', [False, True])
+def test_merge_rejects_forged_rejection_result(manifest, smoke):
+    artifacts = make_shards(manifest, smoke=smoke)
+    key = next(k for k in artifacts[0]['records'] if k.endswith('/patient_rejection'))
+    artifacts[0]['records'][key] = 'f' * 64
+    with pytest.raises(ValueError, match='expected-rejection digest'):
+        shards.merge(artifacts)
+
+
+def test_v4_comparison_rejects_common_missing_results(manifest):
+    from examples.characterize_simulator import compare
+    full = shards.merge(make_shards(manifest))
+    partial = deepcopy(full)
+    partial['records'].pop(next(iter(partial['records'])))
+    with pytest.raises(ValueError, match='coverage'):
+        compare(partial, deepcopy(partial))
+
+
+def test_v4_comparison_rejects_common_forged_rejection(manifest):
+    from examples.characterize_simulator import compare
+    full = shards.merge(make_shards(manifest))
+    key = next(k for k in full['records'] if k.endswith('/created_rejection'))
+    full['records'][key] = '0' * 64
+    with pytest.raises(ValueError, match='expected-rejection digest'):
+        compare(full, deepcopy(full))

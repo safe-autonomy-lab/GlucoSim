@@ -5,11 +5,13 @@ Merge with python examples/characterization_shards.py --output NEW \
     --completion-receipts receipts.json shard*.json.
 The launcher must wait for each process and record receipts as a JSON map:
 {absolute_artifact_path: {"exit_code": 0, "sha256": SHA256_OF_FILE_BYTES}}.
-The initial migration also requires --migrate-serial-reference OLD and
+The original serial-to-sharding migration requires --migrate-serial-reference OLD and
 --serial-runtime-receipt RECEIPT. That receipt binds SHA256 of the sorted-key
 JSON encoding of OLD (capture_digest) to the measured execution_settings and
 a launcher-observed integer exit_code of zero after the serial process exits.
 Keep the old artifact intact; the merged artifact records the validated bridge.
+The separate v3 -> v4 expected-rejection bridge uses
+python -m examples.characterization_migration; it preserves the original baseline.
 All outputs are exclusive creations. A worker publishes only after full coverage
 validation; a failed worker has no completed artifact to contribute.
 """
@@ -30,6 +32,7 @@ PROVENANCE = ('runtime', 'manifest', 'smoke', 'harness_sha256', 'harness_files',
 
 def job_records(manifest, smoke=False):
     """Stable jobs independent of worker count; keys computed without simulation."""
+    from examples.characterization_contract import factory_record_stages
     subset = manifest['smoke'] if smoke else {}
     jobs = {'nondefault': []}
     spec = manifest['nondefault']
@@ -37,7 +40,7 @@ def job_records(manifest, smoke=False):
         for name, case in spec['factory_cases'].items():
             if kind in case.get('types', manifest['types']):
                 jobs['nondefault'].extend(f'nondefault/{spec["patient"]}/{kind}/factory/{name}/{stage}'
-                                          for stage in ('patient', 'created', 'tuned'))
+                                          for stage in factory_record_stages(case, kind))
         if kind != 't1d':
             jobs['nondefault'].extend(f'nondefault/{spec["patient"]}/{kind}/adapter/{name}'
                                       for name in spec['adapter_configs'])
@@ -76,7 +79,8 @@ def membership(manifest, smoke, index, count):
 
 def harness_files():
     return {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in
-            ('examples/characterize_simulator.py', 'examples/characterization_shards.py')}
+            ('examples/characterize_simulator.py', 'examples/characterization_shards.py',
+             'examples/characterization_contract.py', 'examples/characterization_migration.py')}
 
 
 def harness_digest(files):
@@ -96,11 +100,24 @@ def execution_settings():
                 ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')})
 
 
-def validate_records(records, expected):
+def validate_records(records, expected, manifest=None):
     if not isinstance(records, dict) or set(records) != set(expected):
         raise ValueError('Record coverage differs from expected manifest coverage')
     if any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value) for value in records.values()):
         raise ValueError('Invalid record digest')
+    if manifest is not None:
+        from examples.characterization_contract import expected_rejection, factory_record_stages, rejection_digest
+        spec = manifest['nondefault']
+        for kind in manifest['types']:
+            for name, case in spec['factory_cases'].items():
+                rejection = expected_rejection(case, kind)
+                if rejection is None:
+                    continue
+                prefix = f'nondefault/{spec["patient"]}/{kind}/factory/{name}'
+                for stage in factory_record_stages(case, kind):
+                    key = prefix + '/' + stage
+                    if key in records and records[key] != rejection_digest(stage, rejection):
+                        raise ValueError('Invalid expected-rejection digest: ' + key)
 
 
 def reject_duplicate_pairs(pairs):
@@ -154,7 +171,7 @@ def merge(shards):
         seen.add(index)
         if meta.get('jobs') != jobs:
             raise ValueError('Incorrect shard membership')
-        validate_records(shard.get('records'), [key for job in jobs for key in expected_jobs[job]])
+        validate_records(shard.get('records'), [key for job in jobs for key in expected_jobs[job]], trusted_manifest)
         if records.keys() & shard['records'].keys():
             raise ValueError('Duplicate record keys')
         records.update(shard['records'])
@@ -162,7 +179,7 @@ def merge(shards):
         resources[str(index)] = deepcopy(shard.get('capture_resources', {}))
     if seen != set(range(count)):
         raise ValueError('Missing shards')
-    validate_records(records, [key for keys in expected_jobs.values() for key in keys])
+    validate_records(records, [key for keys in expected_jobs.values() for key in keys], trusted_manifest)
     output = {field: deepcopy(first[field]) for field in PROVENANCE}
     output.update(records=records, merged_shards=sorted(receipts, key=lambda item: item['index']), shard_resources=resources)
     return output

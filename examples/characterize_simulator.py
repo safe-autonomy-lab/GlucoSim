@@ -7,8 +7,12 @@ Default is the full manifest; --smoke selects its explicitly defined subset.
 Both modes include the nondefault factory/adapter cases. Captures record the
 bundled and generated CSV hashes. For strict refactors, use --verify-source REV
 and --verify-reference-source REV to bind each side to its intended Git source.
-Version 3 captures require a fresh baseline; older CSV provenance cannot be
-reconstructed retrospectively. Keep the same harness on both sides.
+Version 4 records declared factory rejections and a valid no-pump late override.
+For the pinned v3 -> v4 bridge, run python -m examples.characterization_migration
+--reference OLD --current NEW --current-receipt RECEIPT --output NEW_REPORT.
+The receipt binds successful process exit to the new artifact bytes; see that
+module for its schema. Normal exact comparisons require the same harness on both sides. CSV provenance predating
+version 3 cannot be reconstructed retrospectively.
 Output paths must not exist. Digests cover full arrays, keys and public outputs,
 not just plasma glucose. This is characterization, not clinical validation.
 Capture releases JAX compilation caches between groups to bound memory; run
@@ -78,7 +82,9 @@ def input_hashes(manifest):
 
 
 def capture_nondefault(manifest):
-    """Exercise public factory forwarding and later tuning, plus adapter configs."""
+    """Capture successful factories or declared, origin-checked rejections."""
+    from examples.characterization_contract import expected_rejection, rejection_digest, require_factory_rejection
+    from glucosim.simglucose.core.parameter_builder import build_patient_params
     spec = manifest['nondefault']
     records = {}
     acceptance = patient_factory.ACCEPTANCE_PROB_DEFAULT
@@ -95,6 +101,15 @@ def capture_nondefault(manifest):
                     if case.get('alternative_csv'):
                         kwargs['csv_path'] = str(alternative)
                     prefix = f'nondefault/{spec["patient"]}/{kind}/factory/{name}'
+                    rejection = expected_rejection(case, kind)
+                    if rejection is not None:
+                        for stage, factory in (('patient_rejection', patient_factory.create_patient_params),
+                                               ('created_rejection', create_env_params)):
+                            require_factory_rejection(
+                                lambda: factory(spec['patient'], diabetes_type=kind, **kwargs),
+                                build_patient_params, rejection)
+                            records[prefix + '/' + stage] = rejection_digest(stage, rejection)
+                        continue
                     patient = patient_factory.create_patient_params(spec['patient'], diabetes_type=kind, **kwargs)
                     env = create_env_params(spec['patient'], diabetes_type=kind, **kwargs)
                     records[prefix + '/patient'] = digest(patient)
@@ -269,6 +284,20 @@ def compare(reference, current, allow_reset_fixes=False):
         if field in reference or field in current:
             if sharding.exact_json(reference.get(field)) != sharding.exact_json(current.get(field)):
                 raise ValueError(f'Cannot compare different {field}')
+    if current['manifest'].get('version') == 4:
+        # Equal partial results are not a successful full or smoke capture.
+        if sharding.exact_json(current['manifest']) != sharding.exact_json(sharding.load_capture(MANIFEST)):
+            raise ValueError('Manifest differs from the frozen comparison manifest')
+        if (current.get('harness_files') != sharding.harness_files()
+                or current['harness_sha256'] != sharding.harness_digest(sharding.harness_files())):
+            raise ValueError('Comparison requires the same frozen harness')
+        for artifact in (reference, current):
+            if type(artifact['smoke']) is not bool:
+                raise ValueError('Invalid smoke mode')
+            jobs = sharding.job_records(artifact['manifest'], artifact['smoke'])
+            sharding.validate_records(artifact['records'],
+                                      [key for group in jobs.values() for key in group],
+                                      artifact['manifest'])
     if allow_reset_fixes:
         commit, hashes = legacy_source(reference['manifest']['legacy_commit'])
         if reference['source_commit'] != commit or reference['source_hashes'] != hashes:
@@ -339,12 +368,12 @@ def main():
                   input_hashes=input_hashes(manifest))
     if args.verify_source:
         verify_source(output, args.verify_source)
-    reference = json.loads(args.compare.read_text()) if args.compare else None
+    reference = sharding.load_capture(args.compare) if args.compare else None
     if args.verify_reference_source:
         verify_source(reference, args.verify_reference_source)
     output['records'] = capture(manifest, args.smoke, jobs)
     coverage = sharding.job_records(manifest, args.smoke)
-    sharding.validate_records(output['records'], [key for job in (coverage if jobs is None else jobs) for key in coverage[job]])
+    sharding.validate_records(output['records'], [key for job in (coverage if jobs is None else jobs) for key in coverage[job]], manifest)
     if sharding.harness_files() != files or sharding.execution_settings() != settings:
         raise ValueError('Harness or execution settings changed during capture')
     source_now = {str(path.relative_to(MANIFEST.parent.parent)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -359,11 +388,11 @@ def main():
                                    'elapsed_seconds': time.monotonic() - started,
                                    'hostname': platform.node(),
                                    'cpu_affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None}
-    with args.output.open('x') as file:
-        json.dump(output, file, indent=2)
     if args.compare:
         changed = compare(reference, output, args.allow_reset_fixes)
         print('Comparison passed; intentional changed records:', len(changed))
+    with args.output.open('x') as file:
+        json.dump(output, file, indent=2)
     print('Saved', len(output['records']), 'records to', args.output)
 
 

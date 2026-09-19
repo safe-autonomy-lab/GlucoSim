@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "legacy_commit": "a5bd537",
   "purpose": "Exact legacy and post-fix characterization; organizational extraction must preserve record digests on the same runtime.",
   "patients": {"cohorts": ["adolescent", "adult", "child"], "numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]},
@@ -83,6 +83,20 @@
           "carb_absorption_scale": 1.4,
           "kabs": 0.071,
           "basal": 0.35
+        },
+        "expected_rejection": {
+          "types": ["t2d_no_pump"],
+          "exception": "ValueError",
+          "message": "use_pump=False requires basal=0",
+          "origin": "build_patient_params.resolved_delivery_guard"
+        }
+      },
+      "final_override_no_pump_valid": {
+        "types": ["t2d_no_pump"],
+        "kwargs": {
+          "carb_absorption_scale": 1.4,
+          "kabs": 0.071,
+          "basal": 0.0
         }
       },
       "acceptance": {

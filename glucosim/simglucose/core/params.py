@@ -424,10 +424,10 @@ def adapt_params_for_t1d(
     Returns:
         Adapted parameters for T1D patient
     """
-    from .configuration import LegacyBuildOptions
+    from .configuration import BuildOptions
     from .parameter_builder import build_t1d
 
-    options = LegacyBuildOptions(
+    options = BuildOptions(
         acceptance_probability=ACCEPTANCE_PROB_DEFAULT,
         autobalance_enabled=autobalance_enabled,
         autobalance_basal_scale=autobalance_basal_scale,
@@ -464,10 +464,10 @@ def adapt_params_for_t2d(
     Returns:
         Adapted PatientParams for T2D patient with pump
     """
-    from .configuration import LegacyBuildOptions
+    from .configuration import BuildOptions
     from .parameter_builder import build_t2d
 
-    options = LegacyBuildOptions(
+    options = BuildOptions(
         acceptance_probability=ACCEPTANCE_PROB_DEFAULT,
         carb_absorption_scale=carb_absorption_scale,
         insulin_sensitivity_scale=insulin_sensitivity_scale,
@@ -500,10 +500,10 @@ def adapt_params_for_t2d_no_pump(
     Returns:
         Adapted PatientParams for T2D patient without pump
     """
-    from .configuration import LegacyBuildOptions
+    from .configuration import BuildOptions
     from .parameter_builder import build_t2d_no_pump
 
-    options = LegacyBuildOptions(
+    options = BuildOptions(
         acceptance_probability=ACCEPTANCE_PROB_DEFAULT,
         carb_absorption_scale=carb_absorption_scale,
         insulin_sensitivity_scale=insulin_sensitivity_scale,

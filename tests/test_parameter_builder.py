@@ -9,7 +9,7 @@ from examples.characterize_simulator import digest
 from glucosim import gym_env as gym
 from glucosim.simglucose.core import params, patient_loader
 from glucosim.simglucose.core.configuration import (
-    LegacyBuildOptions, extract_construction_options,
+    BuildOptions, extract_construction_options,
 )
 
 
@@ -20,8 +20,8 @@ def supplied():
 
 def test_options_are_immutable_and_acceptance_is_explicit():
     with pytest.raises(TypeError):
-        LegacyBuildOptions()
-    options = LegacyBuildOptions(acceptance_probability=0.35)
+        BuildOptions()
+    options = BuildOptions(acceptance_probability=0.35)
     with pytest.raises(dataclasses.FrozenInstanceError):
         options.acceptance_probability = 1.0
 
@@ -31,7 +31,7 @@ def test_factory_extraction_preserves_late_and_unrecognized_keywords():
                 acceptance_probability=0.8, t2d_factors={}, unknown=None)
     remaining = late.copy()
     options = extract_construction_options(0.35, remaining)
-    assert options == LegacyBuildOptions(acceptance_probability=0.35)
+    assert options == BuildOptions(acceptance_probability=0.35)
     assert remaining == late
     assert list(remaining) == list(late)
     assert remaining['t2d_factors'] is late['t2d_factors']

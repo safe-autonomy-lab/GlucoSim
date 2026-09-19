@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from . import patient_loader, conversion
 from . import presets
-from .configuration import LegacyBuildOptions, extract_construction_options
+from .configuration import BuildOptions, extract_construction_options
 from .params import PatientParams, EnvParams, NoiseConfig
 from .types import PatientType
 from ..physiology import calibration, kernels
@@ -46,7 +46,7 @@ def _build_patient_from_overrides(patient_name, csv_path, diabetes_type,
 
 
 def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_type: str,
-                         options: LegacyBuildOptions, override_params: dict) -> PatientParams:
+                         options: BuildOptions, override_params: dict) -> PatientParams:
     """Build from CSV; caller has resolved type and separated construction options."""
 
     # Default CSV path if not provided
@@ -171,7 +171,7 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
     return patient_params
 
 
-def build_t1d(base_params: PatientParams, options: LegacyBuildOptions) -> PatientParams:
+def build_t1d(base_params: PatientParams, options: BuildOptions) -> PatientParams:
     """Adapt the exact supplied object, without loading or rebuilding its source."""
     autobalance_enabled = options.autobalance_enabled
     autobalance_basal_scale = options.autobalance_basal_scale
@@ -220,7 +220,7 @@ def build_t1d(base_params: PatientParams, options: LegacyBuildOptions) -> Patien
 
 
 def build_t2d(base_params: PatientParams, config: Optional[dict],
-              options: LegacyBuildOptions) -> PatientParams:
+              options: BuildOptions) -> PatientParams:
     """Preserve the legacy recipe starting from the exact supplied parameters."""
     carb_absorption_scale = options.carb_absorption_scale
     insulin_sensitivity_scale = options.insulin_sensitivity_scale
@@ -288,7 +288,7 @@ def build_t2d(base_params: PatientParams, config: Optional[dict],
 
 
 def build_t2d_no_pump(base_params: PatientParams, config: Optional[dict],
-                      options: LegacyBuildOptions) -> PatientParams:
+                      options: BuildOptions) -> PatientParams:
     """Preserve the legacy recipe starting from the exact supplied parameters."""
     carb_absorption_scale = options.carb_absorption_scale
     insulin_sensitivity_scale = options.insulin_sensitivity_scale

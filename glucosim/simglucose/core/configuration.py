@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class LegacyBuildOptions:
+class BuildOptions:
     acceptance_probability: float
     autobalance_enabled: bool = True
     autobalance_basal_scale: float = 1.0
@@ -22,7 +22,7 @@ class LegacyBuildOptions:
 
 
 def extract_construction_options(acceptance_probability: float,
-                                 overrides: dict) -> LegacyBuildOptions:
+                                 overrides: dict) -> BuildOptions:
     """Consume the six construction keywords from a factory-owned dictionary.
 
     The caller copies public keyword arguments before calling this function.
@@ -42,4 +42,4 @@ def extract_construction_options(acceptance_probability: float,
     ):
         if name in overrides:
             values[name] = overrides.pop(name)
-    return LegacyBuildOptions(acceptance_probability, **values)
+    return BuildOptions(acceptance_probability, **values)

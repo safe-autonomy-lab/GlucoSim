@@ -6,7 +6,8 @@ clock-dependent modulation and process noise belong to separate modules.
 from jax import jit, lax
 import jax.numpy as jnp
 
-from ..core.params import PatientParams, _mgdl_to_mM
+from ..core.params import PatientParams
+from ..core.conversion import _mgdl_to_mM
 from .steady_state_solvers import iir_exogenous_pmolkgmin
 
 

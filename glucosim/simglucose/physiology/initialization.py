@@ -1,7 +1,8 @@
 from typing import Tuple
 import dataclasses
 import jax.numpy as jnp
-from ..core.params import _mgdl_to_mM, EnvParams
+from ..core.params import EnvParams
+from ..core.conversion import _mgdl_to_mM
 from ..core.types import PatientType
 from ..physiology.steady_state_solvers import tune_kp1_to_EGPb, tune_Vm0_to_basal, egp0_for_target
 from ..physiology.state_builders import init_state_t1d, init_state_t2d

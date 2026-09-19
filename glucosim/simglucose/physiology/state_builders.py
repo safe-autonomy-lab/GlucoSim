@@ -1,5 +1,6 @@
 import jax.numpy as jnp
-from ..core.params import PatientParams, _mgdl_to_mM
+from ..core.params import PatientParams
+from ..core.conversion import _mgdl_to_mM
 from ..physiology.steady_state_solvers import insulin_steady_state_from_Sb, iir_exogenous_pmolkgmin, tissue_glucose_steady_state
 
 

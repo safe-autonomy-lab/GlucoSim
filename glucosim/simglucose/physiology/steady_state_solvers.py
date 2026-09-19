@@ -1,5 +1,6 @@
 import jax.numpy as jnp
-from ..core.params import PatientParams, _mM_to_mgdl
+from ..core.params import PatientParams
+from ..core.conversion import _mM_to_mgdl
 
 
 def tune_Vm0_to_basal(params: PatientParams, x0: jnp.ndarray) -> float:

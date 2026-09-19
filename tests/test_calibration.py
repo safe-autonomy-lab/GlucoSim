@@ -50,8 +50,6 @@ def test_factory_keeps_calibration_order(monkeypatch, kind, expected):
             return _original(*args, **kwargs)
 
         monkeypatch.setattr(calibration, name, tracked)
-        if hasattr(params, name):
-            monkeypatch.setattr(params, name, tracked)
     params.create_patient_params('adolescent#001', diabetes_type=kind)
     assert calls == expected
 

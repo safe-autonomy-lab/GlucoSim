@@ -11,6 +11,7 @@ from ..core.types import PatientType
 # Re-export the existing loader API for callers importing core.params.
 from .patient_loader import load_patient_parameters_from_csv
 from ..physiology import calibration
+# Keep existing import paths available; construction uses the owners directly.
 from ..sim.scenario_gen import get_meal_profile_for_cohort
 from ..physiology.kernels import create_insulin_kernel
 
@@ -379,35 +380,10 @@ def create_patient_params(patient_name: str,
         # T2D patient without pump
         params = create_patient_params("adult#007", diabetes_type="t2d_no_pump")
     """
-    # Resolve the documented default and reject unsupported types before CSV I/O.
-    if diabetes_type is None:
-        diabetes_type = "t1d"
-    if not isinstance(diabetes_type, str) or diabetes_type not in ("t1d", "t2d", "t2d_no_pump"):
-        raise ValueError(
-            f"Invalid diabetes_type: {diabetes_type!r}. Must be 't1d', 't2d', or 't2d_no_pump'"
-        )
-
-    # Extract calibration-only options that are not PatientParams fields
-    autobalance_enabled = override_params.pop("autobalance_enabled", True)
-    autobalance_basal_scale = override_params.pop("autobalance_basal_scale", 1.0)
-    autobalance_hepatic_scale = override_params.pop("autobalance_hepatic_scale", 1.0)
-    carb_absorption_scale = override_params.pop("carb_absorption_scale", 1.0)
-    insulin_sensitivity_scale = override_params.pop("insulin_sensitivity_scale", 1.0)
-    eat_rate_scale = override_params.pop("eat_rate_scale", 1.0)
-
-    from .configuration import LegacyBuildOptions
-    from .parameter_builder import build_patient_params
-
-    options = LegacyBuildOptions(
-        acceptance_probability=ACCEPTANCE_PROB_DEFAULT,
-        autobalance_enabled=autobalance_enabled,
-        autobalance_basal_scale=autobalance_basal_scale,
-        autobalance_hepatic_scale=autobalance_hepatic_scale,
-        carb_absorption_scale=carb_absorption_scale,
-        insulin_sensitivity_scale=insulin_sensitivity_scale,
-        eat_rate_scale=eat_rate_scale,
+    from .parameter_builder import _build_patient_from_overrides
+    return _build_patient_from_overrides(
+        patient_name, csv_path, diabetes_type, ACCEPTANCE_PROB_DEFAULT, override_params
     )
-    return build_patient_params(patient_name, csv_path, diabetes_type, options, override_params)
 
 
 def autobalance_basal_t1d(
@@ -536,29 +512,12 @@ def adapt_params_for_t2d_no_pump(
     return build_t2d_no_pump(base_params, config, options)
 
 
-def _mgdl_to_mM(g_mgdl: float) -> float:
-    """Convert glucose from mg/dL to mM."""
-    return g_mgdl / 18.0  # inverse of _mM_to_mgdl, using 180 mg/mmol
-
-def _mM_to_mgdl(G_mM: float) -> float:
-    """Convert glucose from mM to mg/dL."""
-    return G_mM * 18.0
-
-def _mmolmin_from_mgkgmin(val_mgkgmin: float, BW: float) -> float:
-    """Convert mass rate per kg to molar rate for patient."""
-    return (val_mgkgmin * BW) / 180.0
-
-def _as_liters_from_Vg(Vg_raw: float, BW: float) -> float:
-    """Convert glucose distribution volume to liters."""
-    return float(Vg_raw * BW / 10.0)
-
-def _as_liters_from_Vi(Vi_raw: float, BW: float) -> float:
-    """Convert insulin distribution volume to liters."""
-    return float(Vi_raw * BW)
-
-def _mu_per_l(Ib_raw: float) -> float:
-    """Convert basal insulin concentration."""
-    return float(Ib_raw / 6.0)
+# Preserve established helper imports; implementation ownership is conversion.
+from .conversion import (
+    _mgdl_to_mM, _mM_to_mgdl, _mmolmin_from_mgkgmin,
+    _as_liters_from_Vg, _as_liters_from_Vi, _mu_per_l,
+    _almost_equal, _units_ok,
+)
 
 
 def _steady_state_insulin_from_Sb(params: PatientParams) -> tuple[float, float]:
@@ -566,163 +525,21 @@ def _steady_state_insulin_from_Sb(params: PatientParams) -> tuple[float, float]:
     return calibration._steady_state_insulin_from_Sb(params)
 
 
-def _almost_equal(a: float, b: float, tol: float = 1e-9) -> bool:
-    """Helper for floating-point comparisons that respects exact CSV values."""
-    return float(np.abs(a - b)) <= tol
-
-
-def _units_ok(value: float) -> bool:
-    """Simple finiteness/positivity guard for derived parameters."""
-    return np.isfinite(value) and value >= 0.0
-
 
 def patient_to_t2d_params(base_params: PatientParams, use_dynamic_HE: bool = False) -> PatientParams:
-    """
-    Derive the additional fields the hybrid T2D ODE expects without mutating the CSV
-    contract (glucose in mg/kg, insulin in pmol/kg, volumes in dL/kg or L/kg).
-
-    Args:
-        base_params: PatientParams populated directly from the CSV (plus behavior fields).
-        use_dynamic_HE: Whether to model time-varying hepatic extraction.
-
-    Returns:
-        A new PatientParams with the original base fields intact and the T2D-only
-        derived quantities expressed in the units required by the hybrid ODE.
-    """
-    BW = float(base_params.BW)
-    Vg_dL_per_kg = float(base_params.Vg)
-    Vi_L_per_kg = float(base_params.Vi)
-
-    # These conversions only create model-side conveniences; base CSV entries stay mg/kg & pmol/kg.
-    V_G = _as_liters_from_Vg(Vg_dL_per_kg, BW)   # L
-    V_I = _as_liters_from_Vi(Vi_L_per_kg, BW)    # L
-
-    # Basal glucose concentration in mg/dL is still (mg/kg)/(dL/kg); convert to mM for hybrid secretion.
-    Gpb_mg_per_kg = float(base_params.Gpb)
-    G_conc_mg_per_dL = Gpb_mg_per_kg / max(Vg_dL_per_kg, 1e-6)
-    h_mM = _mgdl_to_mM(G_conc_mg_per_dL)
-
-    # Gut absorption dynamics remain in 1/min; we only surface tau_D for the hybrid model.
-    kgut_avg = 0.5 * (float(base_params.kmax) + float(base_params.kmin))
-    k_eff = max(1e-6, min(kgut_avg, float(base_params.kabs)))
-    tau_D = 0.5 / k_eff
-
-    # SC insulin absorption time constant derived from existing rate constants.
-    ka1 = float(base_params.ka1)
-    ka2 = float(base_params.ka2)
-    kd = float(base_params.kd)
-    tau_S = 0.5 * (1.0 / max(ka1 + kd, 1e-6) + 1.0 / max(ka2, 1e-6))
-
-    # Hepatic extraction handling mirrors the original conversion but never rewrites CSV fields.
-    m1 = float(base_params.m1)
-    m2 = float(base_params.m2)
-    m4 = float(base_params.m4)
-    HEb = float(jnp.clip(base_params.HEb, 0.0, 0.95))
-    m3_b = (HEb * m1) / (1.0 - HEb + 1e-9)
-    m5 = float(base_params.m5) if use_dynamic_HE else 0.0
-    m6 = HEb
-
-    # Map basal insulin from pmol/L-equivalent (CSV) into mU/L for secretion bookkeeping.
-    Ib_mU_L = _mu_per_l(float(base_params.Ib))
-    I_p_b = Ib_mU_L * V_I
-    K_b = max(0.0, ((m3_b + m1) * (m2 + m4) / m1) - m2)
-    S_t_b = max(0.0, K_b * I_p_b)
-    # The result cannot be negative.
-    S_sys_target_U_per_hr = 0.4
-
-    # 5. Use the derived S_sys_target to calculate the final Sb_per_kg.
-    # This is the formula from your discussion, which converts the systemic target
-    # back into a per-kilogram portal secretion rate.
-    Sb_per_kg = (S_sys_target_U_per_hr * 1000 / 60) / ((1 - HEb) * BW)
-
-    # Insulin sensitivity terms can be scaled by the IR factor without breaking dimensionality.
-    ir_factor = max(float(base_params.insulin_resistance_factor), 1e-6)
-    S_I1 = base_params.S_I1 / ir_factor
-    S_I2 = base_params.S_I2 / ir_factor
-    S_I3 = base_params.S_I3 / ir_factor
-
-    # k12 mirrors k2 but lives in the hybrid state space.
-    k12 = float(base_params.k2)
-
-    # Endogenous glucose production and CNS uptake remain mg/kg/min in the CSV.
-    # We convert to mmol/min for the hybrid equations here.
-    x3_b = (S_I3 / max(float(base_params.k_a3), 1e-8)) * Ib_mU_L
-    EGP_b_mmol_per_min = _mmolmin_from_mgkgmin(float(base_params.EGPb), BW)
-    EGP_0 = float(EGP_b_mmol_per_min / max(1.0 - x3_b, 1e-6))
-    F_cns0 = _mmolmin_from_mgkgmin(float(base_params.Fsnc), BW)
-
-    updated = dataclasses.replace(
-        base_params,
-        # Hybrid model expects these derived fields.
-        A_G=0.9,
-        tau_D=tau_D,
-        MwG_mg_per_mmol=180.0,
-        tau_S=tau_S,
-        gamma=base_params.gamma,
-        K_deriv=base_params.K_deriv,
-        alpha_s=base_params.alpha_s,
-        beta_s=base_params.beta_s,
-        h=h_mM,
-        Sb_per_kg=Sb_per_kg,
-        m5=m5,
-        m6=m6,
-        V_I=V_I,
-        k_a1=base_params.k_a1,
-        k_a2=base_params.k_a2,
-        k_a3=base_params.k_a3,
-        S_I1=S_I1,
-        S_I2=S_I2,
-        S_I3=S_I3,
-        V_G=V_G,
-        EGP_0=EGP_0,
-        F_cns0=F_cns0,
-        k12=k12,
-        beta_ex=base_params.beta_ex,
-        alpha_QE=base_params.alpha_QE,
-    )
-
-    _assert_csv_contract_preserved(base_params, updated)
-    _assert_t2d_units(updated)
-
-    return updated
+    """Compatibility entry point for T2D unit conversion."""
+    from . import conversion
+    return conversion.patient_to_t2d_params(base_params, use_dynamic_HE)
 
 
 def _assert_csv_contract_preserved(original: PatientParams, updated: PatientParams) -> None:
-    """
-    Make sure the CSV-derived quantities stay identical so unit conversions happen at
-    the ODE boundary rather than in parameter packing.
-    """
-    base_fields = (
-        'BW', 'EGPb', 'Gb', 'Ib', 'u2ss',
-        'Vg', 'Vi', 'V_G_L', 'V_I_L',
-        'Ipb', 'Ilb', 'Gpb', 'Gtb',
-        'Fsnc', 'ke1', 'ke2',
-        'kp1', 'kp2', 'kp3',
-        'k1', 'k2',
-        'Vm0', 'Km0', 'Vmx',
-    )
-    for field in base_fields:
-        original_val = getattr(original, field)
-        updated_val = getattr(updated, field)
-        if isinstance(original_val, (float, int)):
-            assert _almost_equal(float(original_val), float(updated_val)), (
-                f"CSV base field '{field}' was altered during T2D conversion "
-                f"({original_val} -> {updated_val})."
-            )
-        else:
-            assert original_val == updated_val, (
-                f"CSV base field '{field}' was altered during T2D conversion."
-            )
+    from . import conversion
+    return conversion._assert_csv_contract_preserved(original, updated)
 
 
 def _assert_t2d_units(params: PatientParams) -> None:
-    """Run quick sanity checks on the hybrid T2D parameters."""
-    assert _units_ok(params.V_G), "Expected V_G in liters and non-negative."
-    assert _units_ok(params.V_I), "Expected V_I in liters and non-negative."
-    assert _units_ok(params.EGP_0), "EGP_0 must be finite mmol/min."
-    assert _units_ok(params.F_cns0), "F_cns0 must be finite mmol/min."
-    assert np.isfinite(params.h) and params.h >= 0.0, "Setpoint h must be in mM."
-    assert np.isfinite(params.Sb_per_kg) and params.Sb_per_kg >= 0.0, "Basal secretion must be >= 0."
+    from . import conversion
+    return conversion._assert_t2d_units(params)
 
 
 def create_env_params(patient_name: str = "adolescent#001",
@@ -763,50 +580,11 @@ def create_env_params(patient_name: str = "adolescent#001",
         env_params = create_env_params("child#003", diabetes_type="t1d", 
                                       max_bolus_U=5.0, meal_acceptance_prob=0.95)
     """
-    logger.info(f"Creating environment parameters for patient: {patient_name}")
-    
-    cohort_key = patient_name.split('#')[0].lower()
-    meal_mu, meal_sigma = get_meal_profile_for_cohort(cohort_key)
-
-    # Create patient-specific parameters
-    patient_params = create_patient_params(
-        patient_name=patient_name,
-        csv_path=csv_path,
-        diabetes_type=diabetes_type,
-        **patient_overrides
+    from .parameter_builder import build_env_params
+    return build_env_params(
+        patient_name, csv_path, diabetes_type, simulation_minutes, sample_time,
+        ACCEPTANCE_PROB_DEFAULT, patient_overrides
     )
-    
-    # Create other parameter structures
-    dia_steps = 360 # 6 hours * 60 min/hr
-    noise_config = NoiseConfig()
-    
-    # dt_mins=1 because the simulation kernel resolution is 1 minute
-    # duration_hours=6 matches dia_steps=360
-    iob_decay_kernel, insulin_act_kernel = create_insulin_kernel(dt_mins=1, duration_hours=6)
-    
-    # Convert to numpy for storage in EnvParams (JAX arrays are also fine, but casting ensures consistency)
-    iob_decay_kernel = np.array(iob_decay_kernel)
-    insulin_act_kernel = np.array(insulin_act_kernel)
-
-    insulin_kernel_5 = np.array(insulin_act_kernel).reshape((-1, 5)).sum(axis=1)
-
-    # Create environment parameters
-    env_params = EnvParams(
-        patient_params=patient_params,
-        sample_time=sample_time,
-        simulation_minutes=simulation_minutes,
-        dia_steps=dia_steps,
-        insulin_kernel=tuple(insulin_act_kernel),
-        insulin_kernel_5=tuple(insulin_kernel_5),
-        iob_kernel=tuple(iob_decay_kernel),
-        noise_config=noise_config,
-        patient_name=patient_name,
-        meal_amount_mu=jnp.asarray(meal_mu, dtype=jnp.float32),
-        meal_amount_sigma=jnp.asarray(meal_sigma, dtype=jnp.float32),
-    )
-    
-    logger.info(f"Environment parameters created successfully for {patient_name}")
-    return env_params
 
 
 def _register_dataclass_pytree(cls, static_field_names):

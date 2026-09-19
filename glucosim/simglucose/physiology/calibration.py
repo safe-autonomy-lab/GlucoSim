@@ -1,6 +1,6 @@
 """Factory-stage basal calibration, with legacy arithmetic and pass order.
 
-Preset selection and optional stress scaling stay in core.params. Environment
+Preset selection and optional stress scaling stay in core.parameter_builder. Environment
 initial-state tuning stays in physiology.initialization and still runs later.
 These stages intentionally preserve repeated passes; deduplication or changing
 which parameters are calibrated requires a separate behavior change.

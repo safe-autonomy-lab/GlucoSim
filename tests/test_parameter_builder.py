@@ -7,7 +7,7 @@ import pytest
 
 from examples.characterize_simulator import digest
 from glucosim import gym_env as gym
-from glucosim.simglucose.core import params
+from glucosim.simglucose.core import params, patient_loader
 from glucosim.simglucose.core.configuration import LegacyBuildOptions
 
 
@@ -53,7 +53,7 @@ def test_gym_default_precedence_is_separate(monkeypatch, kind):
 def test_direct_input_never_reloads_csv_or_mutates(monkeypatch, supplied, kind):
     def no_csv(*args, **kwargs):
         pytest.fail('Direct adapter attempted to reconstruct the input from CSV')
-    monkeypatch.setattr(params, 'load_patient_parameters_from_csv', no_csv)
+    monkeypatch.setattr(patient_loader, 'load_patient_parameters_from_csv', no_csv)
     direct = dataclasses.replace(supplied, BW=81.25, Vi=0.065, S_I1=supplied.S_I1 * 1.7)
     before = digest(direct)
     adapt = getattr(params, 'adapt_params_for_' + kind)
@@ -98,7 +98,11 @@ def test_repeated_raw_build_does_not_accumulate_scales(kind):
     assert first.Vmx == base.Vmx * 0.8
 
 
-@pytest.mark.parametrize('order', [('params', 'parameter_builder'), ('parameter_builder', 'params')])
+@pytest.mark.parametrize('order', [
+    ('params', 'parameter_builder', 'conversion'),
+    ('parameter_builder', 'conversion', 'params'),
+    ('conversion', 'params', 'parameter_builder'),
+])
 def test_fresh_import_order_and_runtime_class_identity(order):
     script = '\n'.join('from glucosim.simglucose.core import ' + name for name in order)
     script += '\nassert parameter_builder.PatientParams is params.PatientParams\n'

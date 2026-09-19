@@ -2,7 +2,7 @@
 import pytest
 
 from examples.characterize_simulator import digest
-from glucosim.simglucose.core import params
+from glucosim.simglucose.core import params, patient_loader
 from glucosim.simglucose.core.types import PatientType
 
 
@@ -32,6 +32,6 @@ def test_invalid_type_is_rejected_before_loading(monkeypatch, factory, kind):
     def unexpected_load(*args, **kwargs):
         pytest.fail('Invalid diabetes type reached CSV loading')
 
-    monkeypatch.setattr(params, 'load_patient_parameters_from_csv', unexpected_load)
+    monkeypatch.setattr(patient_loader, 'load_patient_parameters_from_csv', unexpected_load)
     with pytest.raises(ValueError, match="Invalid diabetes_type:.*Must be 't1d', 't2d', or 't2d_no_pump'"):
         factory('adolescent#001', diabetes_type=kind, csv_path='unused.csv')

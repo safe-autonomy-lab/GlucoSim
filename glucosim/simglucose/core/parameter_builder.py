@@ -8,18 +8,57 @@ Compatibility functions import this module lazily to avoid a params/builder cycl
 import dataclasses
 import hashlib
 import os
+import logging
 from typing import Optional
 
 import numpy as np
+import jax.numpy as jnp
 
-from . import params as legacy
+from . import patient_loader, conversion
 from . import presets
 from .configuration import LegacyBuildOptions
-from .params import PatientParams
+from .params import PatientParams, EnvParams, NoiseConfig
 from .types import PatientType
-from ..physiology import calibration
+from ..physiology import calibration, kernels
+from ..sim import scenario_gen
 
-logger = legacy.logger
+logger = logging.getLogger('glucosim.simglucose.core.params')
+
+
+def _build_patient_from_overrides(patient_name, csv_path, diabetes_type,
+                                  acceptance_probability, override_params):
+    """Existing factory normalization shared by patient and environment entry points.
+
+    Keep the option representation and late-override contract unchanged. The
+    compatibility facade supplies its live acceptance default at each call.
+    """
+    override_params = override_params.copy()
+    # Resolve the documented default and reject unsupported types before CSV I/O.
+    if diabetes_type is None:
+        diabetes_type = "t1d"
+    if not isinstance(diabetes_type, str) or diabetes_type not in ("t1d", "t2d", "t2d_no_pump"):
+        raise ValueError(
+            f"Invalid diabetes_type: {diabetes_type!r}. Must be 't1d', 't2d', or 't2d_no_pump'"
+        )
+
+    # Extract calibration-only options that are not PatientParams fields
+    autobalance_enabled = override_params.pop("autobalance_enabled", True)
+    autobalance_basal_scale = override_params.pop("autobalance_basal_scale", 1.0)
+    autobalance_hepatic_scale = override_params.pop("autobalance_hepatic_scale", 1.0)
+    carb_absorption_scale = override_params.pop("carb_absorption_scale", 1.0)
+    insulin_sensitivity_scale = override_params.pop("insulin_sensitivity_scale", 1.0)
+    eat_rate_scale = override_params.pop("eat_rate_scale", 1.0)
+
+    options = LegacyBuildOptions(
+        acceptance_probability=acceptance_probability,
+        autobalance_enabled=autobalance_enabled,
+        autobalance_basal_scale=autobalance_basal_scale,
+        autobalance_hepatic_scale=autobalance_hepatic_scale,
+        carb_absorption_scale=carb_absorption_scale,
+        insulin_sensitivity_scale=insulin_sensitivity_scale,
+        eat_rate_scale=eat_rate_scale,
+    )
+    return build_patient_params(patient_name, csv_path, diabetes_type, options, override_params)
 
 
 def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_type: str,
@@ -32,7 +71,7 @@ def build_patient_params(patient_name: str, csv_path: Optional[str], diabetes_ty
         csv_path = os.path.join(current_dir, '..', 'params', 'vpatient_params.csv')
 
     # Load patient data from CSV
-    patient_data = legacy.load_patient_parameters_from_csv(csv_path)
+    patient_data = patient_loader.load_patient_parameters_from_csv(csv_path)
 
     if patient_name not in patient_data:
         available_patients = list(patient_data.keys())
@@ -167,7 +206,7 @@ def build_t1d(base_params: PatientParams, options: LegacyBuildOptions) -> Patien
     )
     # Autobalance the basal rate, with optional weakening to expose harsher dynamics
     if autobalance_enabled:
-        params = legacy.autobalance_basal_t1d(
+        params = calibration.autobalance_basal_t1d(
             params,
             basal_scale=autobalance_basal_scale,
             hepatic_scale=autobalance_hepatic_scale,
@@ -225,7 +264,7 @@ def build_t2d(base_params: PatientParams, config: Optional[dict],
     )
 
     # Convert to T2D format using comprehensive conversion logic
-    t2d_params = legacy.patient_to_t2d_params(temp_params, use_dynamic_HE=False)
+    t2d_params = conversion.patient_to_t2d_params(temp_params, use_dynamic_HE=False)
     basal_rate = calibration.pump_basal_rate_t2d(t2d_params)
 
     # Apply T2D-specific behavioral and physiological parameters
@@ -315,3 +354,53 @@ def build_t2d_no_pump(base_params: PatientParams, config: Optional[dict],
         )
 
     return params
+
+
+def build_env_params(patient_name, csv_path, diabetes_type, simulation_minutes,
+                     sample_time, acceptance_probability, patient_overrides) -> EnvParams:
+    """Own environment assembly while preserving the public factory's stage order."""
+    logger.info(f"Creating environment parameters for patient: {patient_name}")
+
+    cohort_key = patient_name.split('#')[0].lower()
+    meal_mu, meal_sigma = scenario_gen.get_meal_profile_for_cohort(cohort_key)
+
+    # Create patient-specific parameters
+    patient_params = _build_patient_from_overrides(
+        patient_name=patient_name,
+        csv_path=csv_path,
+        diabetes_type=diabetes_type,
+        acceptance_probability=acceptance_probability,
+        override_params=patient_overrides
+    )
+
+    # Create other parameter structures
+    dia_steps = 360 # 6 hours * 60 min/hr
+    noise_config = NoiseConfig()
+
+    # dt_mins=1 because the simulation kernel resolution is 1 minute
+    # duration_hours=6 matches dia_steps=360
+    iob_decay_kernel, insulin_act_kernel = kernels.create_insulin_kernel(dt_mins=1, duration_hours=6)
+
+    # Convert to numpy for storage in EnvParams (JAX arrays are also fine, but casting ensures consistency)
+    iob_decay_kernel = np.array(iob_decay_kernel)
+    insulin_act_kernel = np.array(insulin_act_kernel)
+
+    insulin_kernel_5 = np.array(insulin_act_kernel).reshape((-1, 5)).sum(axis=1)
+
+    # Create environment parameters
+    env_params = EnvParams(
+        patient_params=patient_params,
+        sample_time=sample_time,
+        simulation_minutes=simulation_minutes,
+        dia_steps=dia_steps,
+        insulin_kernel=tuple(insulin_act_kernel),
+        insulin_kernel_5=tuple(insulin_kernel_5),
+        iob_kernel=tuple(iob_decay_kernel),
+        noise_config=noise_config,
+        patient_name=patient_name,
+        meal_amount_mu=jnp.asarray(meal_mu, dtype=jnp.float32),
+        meal_amount_sigma=jnp.asarray(meal_sigma, dtype=jnp.float32),
+    )
+
+    logger.info(f"Environment parameters created successfully for {patient_name}")
+    return env_params

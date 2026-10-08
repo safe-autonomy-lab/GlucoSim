@@ -18,20 +18,20 @@ from typing import Callable
 
 import gymnasium
 
-from glucobench.safety_gymnasium.wrappers.autoreset import SafeAutoResetWrapper
-from glucobench.safety_gymnasium.wrappers.env_checker import SafePassiveEnvChecker
-from glucobench.safety_gymnasium.wrappers.gymnasium_conversion import (
+from glucosim.safety_gymnasium.wrappers.autoreset import SafeAutoResetWrapper
+from glucosim.safety_gymnasium.wrappers.env_checker import SafePassiveEnvChecker
+from glucosim.safety_gymnasium.wrappers.gymnasium_conversion import (
     Gymnasium2SafetyGymnasium,
     SafetyGymnasium2Gymnasium,
 )
-from glucobench.safety_gymnasium.wrappers.normalize import (
+from glucosim.safety_gymnasium.wrappers.normalize import (
     SafeNormalizeCost,
     SafeNormalizeObservation,
     SafeNormalizeReward,
 )
-from glucobench.safety_gymnasium.wrappers.rescale_action import SafeRescaleAction
-from glucobench.safety_gymnasium.wrappers.time_limit import SafeTimeLimit
-from glucobench.safety_gymnasium.wrappers.unsqueeze import SafeUnsqueeze
+from glucosim.safety_gymnasium.wrappers.rescale_action import SafeRescaleAction
+from glucosim.safety_gymnasium.wrappers.time_limit import SafeTimeLimit
+from glucosim.safety_gymnasium.wrappers.unsqueeze import SafeUnsqueeze
 
 
 __all__ = [

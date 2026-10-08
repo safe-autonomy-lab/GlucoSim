@@ -27,7 +27,7 @@ from gymnasium.envs.registration import EnvSpec, _check_metadata, _find_spec, lo
 from gymnasium.envs.registration import register as gymnasium_register
 from gymnasium.wrappers import HumanRendering, OrderEnforcing, RenderCollection
 
-from glucobench.safety_gymnasium.wrappers import SafeAutoResetWrapper, SafePassiveEnvChecker, SafeTimeLimit
+from glucosim.safety_gymnasium.wrappers import SafeAutoResetWrapper, SafePassiveEnvChecker, SafeTimeLimit
 
 
 safe_registry = set()

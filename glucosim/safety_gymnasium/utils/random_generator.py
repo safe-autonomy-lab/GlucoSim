@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from glucobench.safety_gymnasium.utils.common_utils import ResamplingError
+from glucosim.safety_gymnasium.utils.common_utils import ResamplingError
 
 
 class RandomGenerator:

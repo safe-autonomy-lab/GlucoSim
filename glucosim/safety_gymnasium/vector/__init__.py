@@ -21,9 +21,9 @@ from typing import Iterable
 import gymnasium
 from gymnasium.vector.vector_env import VectorEnv
 
-from glucobench.safety_gymnasium.utils.registration import make as safety_make
-from glucobench.safety_gymnasium.vector.async_vector_env import SafetyAsyncVectorEnv
-from glucobench.safety_gymnasium.vector.sync_vector_env import SafetySyncVectorEnv
+from glucosim.safety_gymnasium.utils.registration import make as safety_make
+from glucosim.safety_gymnasium.vector.async_vector_env import SafetyAsyncVectorEnv
+from glucosim.safety_gymnasium.vector.sync_vector_env import SafetySyncVectorEnv
 
 
 __all__ = ['SafetyAsyncVectorEnv', 'SafetySyncVectorEnv', 'VectorEnv', 'make']

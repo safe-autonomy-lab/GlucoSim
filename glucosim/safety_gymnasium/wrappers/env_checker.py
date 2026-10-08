@@ -17,7 +17,7 @@
 from gymnasium.core import ActType
 from gymnasium.wrappers import PassiveEnvChecker
 
-from glucobench.safety_gymnasium.utils.passive_env_checker import env_step_passive_checker
+from glucosim.safety_gymnasium.utils.passive_env_checker import env_step_passive_checker
 
 
 class SafePassiveEnvChecker(PassiveEnvChecker):

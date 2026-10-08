@@ -25,7 +25,7 @@ from gymnasium.utils.passive_env_checker import (
     env_reset_passive_checker,
 )
 
-from glucobench.gym_env.utils.passive_env_checker import env_step_passive_checker
+from glucosim.gym_env.utils.passive_env_checker import env_step_passive_checker
 
 if TYPE_CHECKING:
     from gymnasium.envs.registration import EnvSpec

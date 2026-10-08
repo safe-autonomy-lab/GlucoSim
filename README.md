@@ -114,7 +114,7 @@ directly comparable.
 ![Ten largest predictive-shield gains over the static shield, per mode.](docs/figures/fig4_top_gains_vs_static.png)
 
 These are unweighted means over type × cohort cells and ignore across-patient
-SDs. See [`docs/RESULTS.md`](docs/RESULTS.md) for the per-cell tables, rollups,
+SDs across three independently trained policy seeds. See [`docs/RESULTS.md`](docs/RESULTS.md) for the per-cell tables, rollups,
 and caveats.
 
 </details>

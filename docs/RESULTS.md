@@ -2,6 +2,8 @@
 
 Time-in-range (TIR, %) on unseen patients (#002–#010) over the seven-day horizon, reported as mean ± SD. Each row compares the same trained policy with **no shield**, a **static shield**, and the **predictive shield** (penalty = 10). 6 algorithms × 3 diabetes types × 3 age cohorts = 54 cells per mode.
 
+After fixing the simulator's meal absorption, background exercise noise, circadian glucose production, and initial glucose and insulin balances, we reran these experiments; numbers from earlier simulator versions are not directly comparable.
+
 ## Figures
 
 ![Mean TIR by cohort](figures/fig1_tir_by_cohort.png)

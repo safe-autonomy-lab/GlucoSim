@@ -97,10 +97,10 @@ patients (#002–#010) over a seven-day horizon for six safe RL algorithms, each
 run with no shield, a static shield, and a predictive shield (penalty = 10).
 The figures live in [`docs/figures/`](docs/figures).
 
-These experiments were rerun after the 2026 simulator correctness fixes, so
-they are not directly comparable to numbers from earlier simulator versions.
-The simulator-version note at the top of [`docs/RESULTS.md`](docs/RESULTS.md)
-lists the fixes.
+After fixing the simulator's meal absorption, background exercise noise,
+circadian glucose production, and initial glucose and insulin balances, we
+reran these experiments; numbers from earlier simulator versions are not
+directly comparable.
 
 <details>
 <summary>Summary figures (penalty = 10)</summary>

@@ -90,6 +90,30 @@ The scenario example also supports GIF output via
 
 *Conceptual interaction loop; this animation is not a simulated glucose trace.*
 
+## Predictive shielding results
+
+[`docs/RESULTS.md`](docs/RESULTS.md) reports time-in-range (TIR) on unseen
+patients (#002–#010) over a seven-day horizon for six safe RL algorithms, each
+run with no shield, a static shield, and a predictive shield (penalty = 10).
+The figures live in [`docs/figures/`](docs/figures).
+
+<details>
+<summary>Summary figures (penalty = 10)</summary>
+
+![Mean TIR by cohort for no, static, and predictive shields, deterministic and stochastic modes.](docs/figures/fig1_tir_by_cohort.png)
+
+![Mean TIR by diabetes type for no, static, and predictive shields, deterministic and stochastic modes.](docs/figures/fig2_tir_by_type.png)
+
+![Mean TIR change of the predictive over the static shield, per algorithm.](docs/figures/fig3_delta_vs_static_by_algorithm.png)
+
+![Ten largest predictive-shield gains over the static shield, per mode.](docs/figures/fig4_top_gains_vs_static.png)
+
+These are unweighted means over type × cohort cells and ignore across-patient
+SDs. See [`docs/RESULTS.md`](docs/RESULTS.md) for the per-cell tables, rollups,
+and caveats.
+
+</details>
+
 ## Installation
 
 Requires Python >= 3.10.

@@ -2,6 +2,23 @@
 
 Time-in-range (TIR, %) on unseen patients (#002–#010) over the seven-day horizon, reported as mean ± SD. Each row compares the same trained policy with **no shield**, a **static shield**, and the **predictive shield** (penalty = 10). 6 algorithms × 3 diabetes types × 3 age cohorts = 54 cells per mode.
 
+> **Simulator version.** These experiments were rerun on the current simulator,
+> after the correctness fixes below. Numbers produced on earlier simulator
+> versions, including any earlier reports, are not directly comparable.
+>
+> - **June 2026 (`f5662cc`):** meal absorption no longer scales with
+>   `sample_time` (`e0fdf8c`); background heart-rate noise no longer triggers
+>   exercise glucose disposal at rest (`ce6cdb2`); circadian EGP amplitude
+>   reduced from ±10% to ±3% (`47cb9a9`).
+> - **September 2026:** corrected meal, bolus, and basal accounting, fasting and
+>   tissue equilibrium initialization, T2D resistance scaling and pump basal,
+>   unit conversions, and exercise-state handling (`a5bd537`); seeded resets no
+>   longer depend on warmup-cache order (`1781573`).
+>
+> Net effect: fasting glucose now starts near the tuned setpoint instead of
+> drifting low, and unbolused meals drive hyperglycemia, so policies must dose
+> insulin to stay in range.
+
 ## Figures
 
 ![Mean TIR by cohort](figures/fig1_tir_by_cohort.png)

@@ -13,9 +13,10 @@ import gc
 import os
 from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Generic, SupportsFloat, TypeVar
+from typing import Any, Generic, SupportsFloat
 
 import numpy as np
+from typing_extensions import TypeVar
 
 import gymnasium as gym
 from gymnasium import error, logger
@@ -24,8 +25,9 @@ from gymnasium.error import DependencyNotInstalled, InvalidProbability
 
 # gymnasium>=1.3 turned ``RenderFrame`` into a union type, which is not a valid
 # ``Generic[...]`` parameter. Keep a local TypeVar so this vendored module works
-# across gymnasium versions.
-RenderFrame = TypeVar("RenderFrame")
+# across gymnasium versions. gymnasium>=1.4 gives ObsType/ActType a default,
+# so this TypeVar, listed after them, needs one too.
+RenderFrame = TypeVar("RenderFrame", default=Any)
 
 
 __all__ = [

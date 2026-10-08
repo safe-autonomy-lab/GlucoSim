@@ -16,6 +16,7 @@ dependencies = [
   "pandas>=2.0",
   "matplotlib>=3.8",
   "gymnasium>=1.2",
+  "typing-extensions>=4.12",
 ]
 
 [project.optional-dependencies]

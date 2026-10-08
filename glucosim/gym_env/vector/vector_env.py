@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic
 
 import numpy as np
+from typing_extensions import TypeVar
 
 import gymnasium as gym
 from gymnasium.core import ActType, ObsType, RenderFrame
@@ -16,7 +17,9 @@ from gymnasium.utils import seeding
 if TYPE_CHECKING:
     from gymnasium.envs.registration import EnvSpec
 
-ArrayType = TypeVar("ArrayType")
+# gymnasium>=1.4 gives ObsType/ActType a default, so a TypeVar listed after
+# them in ``Generic[...]`` must have one too.
+ArrayType = TypeVar("ArrayType", default=Any)
 
 
 __all__ = [
